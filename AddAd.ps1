@@ -68,8 +68,7 @@ if (-not $scriptPath) { $scriptPath = $MyInvocation.MyCommand.Path }
 $progressFile  = "C:\Temp\AddAd_progress.txt"
 $scriptLog     = "C:\Temp\AddAd_$(Get-Date -Format 'yyyyMMdd').log"
 $taskName      = "RunAddAdAfterRestart"
-# OSConfig-spezifische Pfade (Windows Server 2025)
-$osconfigWorkDir = "C:\Temp\OSConfig"
+
 
 # --- Hilfsfunktionen --------------------------------------------------------
 function Write-Log {
@@ -224,108 +223,21 @@ function Step-Optimize {
 function Step-Harden {
     Write-Log "Schritt 3: Haerten ueber OSConfig (Windows Server 2025)."
 
-    New-Item -ItemType Directory -Path $osconfigWorkDir -Force | Out-Null
-    $osConfigApplied = $false
-
-    # 3a) OSConfig - primärer Haertungspfad unter Windows Server 2025
-    #     OSConfig liefert DSC-basierte Security Baselines (u.a. "Microsoft: Windows Server 2025 Security Baseline - Domain Controller").
+    # OSConfig: Modul installieren und DC-Security-Baseline als Desired Configuration anwenden.
+    # Windows Server 2025 stellt DSC-basierte Security Baselines bereit; der Scenario-Pfad
+    # "SecurityBaseline/WindowsServer/2025/DomainController" haertet den Server passend fuer einen DC.
     try {
-        Import-Module OSConfig -ErrorAction Stop
-
-        # Verfügbare Baselines ermitteln und DC-spezifische Baseline auswaehlen
-        $baselines = Get-OSConfigConfiguration -ErrorAction Stop
-        $dcBaseline = $baselines | Where-Object { $_.Name -match "Domain Controller|DC" } | Select-Object -First 1
-        if (-not $dcBaseline) {
-            $dcBaseline = $baselines | Where-Object { $_.Name -match "Security Baseline" } | Select-Object -First 1
-        }
-
-        if ($dcBaseline) {
-            Write-Log "Wende OSConfig-Baseline an: $($dcBaseline.Name)"
-            Set-OSConfigConfiguration -Configuration $dcBaseline -Force -ErrorAction Stop
-            $osConfigApplied = $true
-            Write-Log "OSConfig DC-Baseline erfolgreich angewendet."
-        } else {
-            Write-Log "Keine DC-Baseline unter Get-OSConfigConfiguration gefunden - wende generische OSConfig-Sicherheitsregeln an."
-            $allConfigs = Get-OSConfigConfiguration -ErrorAction SilentlyContinue
-            $secConfigs = $allConfigs | Where-Object { $_.Category -match "Security|Baseline|Hardening" }
-            if ($secConfigs) {
-                foreach ($cfg in $secConfigs) {
-                    try { Set-OSConfigConfiguration -Configuration $cfg -Force -ErrorAction SilentlyContinue } catch { }
-                }
-                $osConfigApplied = $true
-                Write-Log "OSConfig: $($secConfigs.Count) generische Sicherheitskonfiguration(en) angewendet."
-            }
-        }
+        Write-Log "Installiere OSConfig-Modul..."
+        Install-Module -Name Microsoft.OSConfig -Scope AllUsers -Force -ErrorAction Stop
+        Write-Log "Wende OSConfig DC-Security-Baseline an (Scenario SecurityBaseline/WindowsServer/2025/DomainController)..."
+        Set-OSConfigDesiredConfiguration -Scenario "SecurityBaseline/WindowsServer/2025/DomainController" -Default -ErrorAction Stop
+        Write-Log "OSConfig DC-Security-Baseline erfolgreich angewendet."
     } catch {
-        Write-Log "OSConfig Modul/Baseline nicht anwendbar: $_."
-    }
-
-    # 3b) Alternative Haertung (Registry/secedit/SMB/Defender) - als ergaenzendes Sicherheitsnetz,
-    #     damit der DC auch bei fehlender/veraenderter OSConfig-API deterministisch gehaertet ist.
-    Set-AlternativeHardening
-
-    if (-not $osConfigApplied) {
-        Write-Log "WARNUNG: OSConfig konnte nicht angewendet werden - nur Fallback-Haertung aktiv."
+        Write-Log "OSConfig konnte nicht angewendet werden: $_"
     }
 
     Save-Progress -Step "step3finish"
     Invoke-Reboot -NextStepName "Domain Controller Promotion"
-}
-
-function Set-AlternativeHardening {
-    # Verzeichnis fuer zusaetzliche Haertungs-Keys
-    $secKey = "HKLM:\SOFTWARE\AddAd\Hardening"
-    if (-not (Test-Path $secKey)) { New-Item -Path $secKey -Force | Out-Null }
-
-    # Verhinderung von LM/NTLMv1, erzwingen NTLMv2
-    Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "LmCompatibilityLevel" -Value 5 -Type DWord
-    # SMB Signing erzwingen
-    Set-SmbServerConfiguration -RequireSecuritySignature $true -EnableSecuritySignature $true -Force -ErrorAction SilentlyContinue
-    # RDP Network Level Authentication
-    Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "UserAuthentication" -Value 1 -Type DWord
-    # Enumerierung von Administrator-Konten unterdruecken
-    Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "DisableDomainCreds" -Value 1 -Type DWord -ErrorAction SilentlyContinue
-    # Anonymous SAM Enumerations deaktivieren
-    Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RestrictAnonymousSAM" -Value 1 -Type DWord
-    # UAC erzwungen
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "EnableLUA" -Value 1 -Type DWord
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "ConsentPromptBehaviorAdmin" -Value 2 -Type DWord
-    # PowerShell Logging aktivieren
-    $psKey = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging"
-    if (-not (Test-Path $psKey)) { New-Item -Path $psKey -Force | Out-Null }
-    Set-ItemProperty -Path $psKey -Name "EnableScriptBlockLogging" -Value 1 -Type DWord
-    # Windows Defender Attack Surface Reduction (ASR) Regeln aktivieren (Audit-Modus)
-    try {
-        Set-MpPreference -AttackSurfaceReductionRules_Ids @("BE9BA2D9-53EA-4CDC-84E5-9B1ECE542E46","D4F940AB-401B-4EFC-AADC-AD5F3C50688A","75668C1F-73B5-4CF0-BB93-3ECF5CB7CC84","3B576869-A4EC-4529-8536-B80A7769E899") -AttackSurfaceReductionRules_Actions Audit -ErrorAction SilentlyContinue
-    } catch { }
-
-    # secedit: Passwort-/Sperrrichtlinie (entspricht DC-Baseline)
-    $seceditCfg = @"
-[Unicode]
-Unicode=yes
-[System Access]
-MinimumPasswordLength = 14
-PasswordComplexity = 1
-MaximumPasswordAge = 60
-MinimumPasswordAge = 1
-PasswordHistorySize = 24
-LockoutBadCount = 5
-ResetLockoutCount = 15
-LockoutDuration = 15
-[Event Audit]
-AuditSystemEvents = 3
-AuditLogonEvents = 3
-AuditObjectAccess = 3
-AuditPrivilegeUse = 3
-AuditPolicyChange = 3
-AuditAccountManage = 3
-AuditAccountLogon = 3
-"@
-    $secFile = "C:\Temp\secedit_hardening.inf"
-    $seceditCfg | Out-File -FilePath $secFile -Force -Encoding Unicode
-    secedit /configure /db C:\Windows\security\local.sdb /cfg "$secFile" /quiet
-    gpupdate /force 2>$null | Out-Null
-    Write-Log "Alternative Haertung (Registry/secedit/SMB/Defender) angewendet."
 }
 
 # --- Schritt 4: Domain Controller hochstufen -------------------------------
