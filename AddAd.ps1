@@ -108,135 +108,18 @@ function Remove-ScheduledTask {
 function Set-GermanLocalization {
     Write-Log "Konfiguriere deutsche Lokalisierung / regionale Einstellungen."
 
-    $langDE   = "de-DE"
-    $cultureDE = New-Object System.Globalization.CultureInfo($langDE)
-    $lcidDE   = [System.Globalization.CultureInfo]::GetCultureInfo($langDE).LCID
+    # Region und Formate auf Deutsch (Deutschland) setzen
+    Set-Culture de-DE
+    Set-WinHomeLocation -GeoId 94
 
-    # 1) Deutsche Sprachpakete installieren (Server 2025 inkl. LanguageFeatures)
-    try {
-        $avail = Get-WindowsCapability -Online -ErrorAction SilentlyContinue | Where-Object {
-            $_.Name -match "Language\.Basic~~~de-DE" -and $_.State -ne "Installed"
-        }
-        if ($avail) {
-            Write-Log "Installiere deutsches Sprachpaket (Language.Basic de-DE)..."
-            $avail | ForEach-Object { Add-WindowsCapability -Online -Name $_.Name -ErrorAction SilentlyContinue } | Out-Null
-        }
-        # Text-to-Speech/Handwriting-Ergaenzungen (optional, verhindert fehlende Features)
-        $features = @("Language.Handwriting~~~de-DE~0.0.1.0","Language.TextToSpeech~~~de-DE~0.0.1.0")
-        foreach ($f in $features) {
-            $cap = Get-WindowsCapability -Online -Name $f -ErrorAction SilentlyContinue
-            if ($cap -and $cap.State -ne "Installed") {
-                Add-WindowsCapability -Online -Name $f -ErrorAction SilentlyContinue | Out-Null
-            }
-        }
-        Write-Log "Sprachpakete bereitgestellt."
-    } catch { Write-Log "Sprachpaket-Installation fehlgeschlagen: $_" }
+    # Tastaturlayout auf Deutsch (Standard) setzen
+    Set-WinUserLanguageList -LanguageList de-DE -Force
 
-    # 2) Internationale Formate (Uhrzeit, Datum, Zahlen, Region) auf de-DE setzen
-    try {
-        Set-Culture -CultureInfo $cultureDE
-        Set-WinSystemLocale -SystemLocale $langDE
-        Set-WinHomeLocation -GeoId 94              # 94 = Deutschland
-        Set-WinUserLanguageList de-DE -Force
-        Set-Culture -CultureInfo $cultureDE
-        Write-Log "Regionale Formate (de-DE), SystemLocale, GeoId und UserLanguageList gesetzt."
-    } catch { Write-Log "Regionale Formate konnten nicht gesetzt werden: $_" }
+    Set-SystemPreferredUILanguage de-DE
 
-    # 3) Tastatur-Layout: Deutsch (evtl. zusaetzlich US beibehalten fuer RDP-Login)
-    try {
-        $langList = Get-WinUserLanguageList
-        # Deutsch als primäres Layout
-        $de = $langList | Where-Object { $_.LanguageTag -eq "de-DE" }
-        if (-not $de) {
-            $de = New-WinUserLanguageList "de-DE"
-            $langList = $de
-        }
-        # US als sekundaeres Layout fuer evtl. Login-Situationen
-        if (-not ($langList | Where-Object { $_.LanguageTag -eq "en-US" })) {
-            $langList.Add("en-US")
-        }
-        Set-WinUserLanguageList $langList -Force
-        Write-Log "Tastatur-Layouts gesetzt: de-DE (primär), en-US (sekundaer)."
-    } catch { Write-Log "Tastatur-Layout konnte nicht gesetzt werden: $_" }
+    Copy-UserInternationalSettingsFromSystem -WelcomeScreen $true -NewUserTemplate $true
 
-    # 4) Systemweite Locale via Registry (gilt fuer alle Benutzer, auch Dienste/System)
-    try {
-        $intlKey = "HKLM:\SYSTEM\CurrentControlSet\Control\Nls\Language"
-        Set-ItemProperty -Path $intlKey -Name "Default"      -Value "0407" -Type String  # de-DE
-        Set-ItemProperty -Path $intlKey -Name "InstallLanguage" -Value "0409" -Type String  # urspruengl. Install
-
-        $langKey = "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel"
-        Set-ItemProperty -Path $langKey -Name "SetDefaultThreadLocale" -Value 1 -Type DWord -ErrorAction SilentlyContinue
-
-        # Uhr-/Datumsformat (intl.cpl Equivalent)
-        $sIntlKey = "Registry::HKEY_USERS\.DEFAULT\Control Panel\International"
-        $intlValues = @{
-            "Locale"            = "00000407"
-            "LocaleName"        = "de-DE"
-            "sLanguage"         = "DEU"
-            "sCountry"          = "Deutschland"
-            "sShortDate"        = "dd.MM.yyyy"
-            "sLongDate"         = "dddd, d. MMMM yyyy"
-            "sShortTime"        = "HH:mm"
-            "sTimeFormat"       = "HH:mm:ss"
-            "sTime"             = ":"
-            "sDecimal"          = ","
-            "sThousand"         = "."
-            "sDate"             = "."
-            "sList"             = ";"
-            "iDate"             = "1"
-            "iTime"             = "1"
-            "iTLZero"           = "1"
-            "iFirstDayOfWeek"   = "0"
-            "iFirstWeekOfYear"  = "2"
-            "sPositiveSign"     = ""
-            "sNegativeSign"     = "-"
-        }
-        foreach ($k in $intlValues.Keys) {
-            Set-ItemProperty -Path $sIntlKey -Name $k -Value $intlValues[$k] -Type String -ErrorAction SilentlyContinue
-        }
-        Write-Log "Systemweite Locale/Uhr-/Datumsformat via Registry gesetzt."
-    } catch { Write-Log "Systemweite Registry-Locale konnte nicht gesetzt werden: $_" }
-
-    # 5) Welcome Screen (System-Account) und Default-User-Profil (zukuenftige Benutzer)
-    try {
-        # Welcome Screen (SYSTEM)
-        $sysIntl = "Registry::HKEY_USERS\.DEFAULT\Control Panel\International"
-        foreach ($k in $intlValues.Keys) {
-            Set-ItemProperty -Path $sysIntl -Name $k -Value $intlValues[$k] -Type String -ErrorAction SilentlyContinue
-        }
-
-        # Default-User-Profil: aus aktueller Konfiguration in NTUSER.DAT laden und anwenden
-        $defUser = "C:\Windows\System32\config\defaultprofile"
-        $defHive = "HKLM:\TempDefUser"
-        reg load "HKLM\TempDefUser" "$defUser\NTUSER.DAT" 2>$null | Out-Null
-        $defIntl = "$defHive\Control Panel\International"
-        if (-not (Test-Path $defIntl)) { New-Item -Path $defIntl -Force | Out-Null }
-        foreach ($k in $intlValues.Keys) {
-            Set-ItemProperty -Path $defIntl -Name $k -Value $intlValues[$k] -Type String -ErrorAction SilentlyContinue
-        }
-        # Tastatur fuer Default-User-Profil (preload)
-        $kbdKey = "$defHive\Keyboard Layout\Preload"
-        if (-not (Test-Path $kbdKey)) { New-Item -Path $kbdKey -Force | Out-Null }
-        Set-ItemProperty -Path $kbdKey -Name "1" -Value "00000407" -Type String
-        Set-ItemProperty -Path $kbdKey -Name "2" -Value "00000409" -Type String -ErrorAction SilentlyContinue
-        # Sprachliste im Default-User-Profil
-        if (Test-Path "$defHive\Control Panel\Desktop") {
-            Set-ItemProperty -Path "$defHive\Control Panel\Desktop" -Name "PreferredUILanguages" -Value "de-DE" -Type MultiString -ErrorAction SilentlyContinue
-        }
-        [gc]::Collect()
-        reg unload "HKLM\TempDefUser" 2>$null | Out-Null
-        Write-Log "Welcome Screen und Default-User-Profil auf de-DE gesetzt."
-    } catch { Write-Log "Welcome Screen / Default-User-Profil nicht gesetzt: $_" }
-
-    # 6) Welcome-Screen Sprache explizit (Winlogon)
-    try {
-        $winlogonKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\policies\system"
-        Set-ItemProperty -Path $winlogonKey -Name "PreferredUILanguages" -Value "de-DE" -Type String -ErrorAction SilentlyContinue
-    } catch { }
-
-    # 7) Sicherheitskonto (SYSTEM) explizit - Double-Protection
-    try { Set-WinSystemLocale -SystemLocale "de-DE" -ErrorAction SilentlyContinue } catch { }
+    Write-Log "Deutsche Lokalisierung gesetzt (Region, Tastatur, UI-Sprache, Welcome Screen, Default User)."
 }
 
 function Set-StaticIPConfig {
