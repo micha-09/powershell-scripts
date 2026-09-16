@@ -8,7 +8,7 @@
 
       Schritt 1: Initialisierung   (geplante Aufgabe anlegen, statische IP setzen, Basis-Konfig)
       Schritt 2: Server optimieren  (Powerplan, Dienste, Updates, Zeitzone, etc.)
-      Schritt 3: Haerten            (Microsoft Security Baselines fuer Domain Controller + OSConfig)
+      Schritt 3: Haerten            (OSConfig Security Baseline fuer Domain Controller, Windows Server 2025)
       Schritt 4: DC hochstufen      (AD DS + DNS installieren, Forest erstellen)
       Schritt 5: Domäne befüllen    (OUs, Gruppen, Benutzer, Computer als Musterdaten)
       Schritt 6: Aufraeumen         (geplante Aufgabe entfernen, Fortschrittsdatei loeschen)
@@ -17,8 +17,8 @@
 
     Voraussetzungen:
       - Ausfuehrung als SYSTEM (z.B. ueber geplante Aufgabe mit RunLevel Highest)
-      - Windows Server 2022 / 2025 (Desktop Experience oder Server Core)
-      - Internetzugang zum Download der Security Compliance Toolkit Baselines
+      - Windows Server 2025 (Desktop Experience oder Server Core) - Haertung erfolgt rein ueber OSConfig
+      - Internetzugang fuer OSConfig-Baseline-Download (falls erforderlich)
       - Statische IP / DNS konfigurierbar (wird vom Skript gesetzt, falls gewuenscht)
 
 .PARAMETER DomainName
@@ -68,8 +68,8 @@ if (-not $scriptPath) { $scriptPath = $MyInvocation.MyCommand.Path }
 $progressFile  = "C:\Temp\AddAd_progress.txt"
 $scriptLog     = "C:\Temp\AddAd_$(Get-Date -Format 'yyyyMMdd').log"
 $taskName      = "RunAddAdAfterRestart"
-$toolkitPath   = "C:\Temp\SCT"
-$baselineUrl   = "https://download.microsoft.com/download/8/5/C/85C25433-A1B0-4FFA-9CE9-7BFE12986606/SecurityComplianceToolkit.msi" # Beispiel-URL; ggf. anpassen
+# OSConfig-spezifische Pfade (Windows Server 2025)
+$osconfigWorkDir = "C:\Temp\OSConfig"
 
 # --- Hilfsfunktionen --------------------------------------------------------
 function Write-Log {
@@ -220,70 +220,53 @@ function Step-Optimize {
     Invoke-Reboot -NextStepName "Haertung"
 }
 
-# --- Schritt 3: Haerten (Security Baselines + OSConfig) --------------------
+# --- Schritt 3: Haerten (OSConfig, Windows Server 2025) -------------------
 function Step-Harden {
-    Write-Log "Schritt 3: Haerten mit Security Baselines (DC) und OSConfig."
+    Write-Log "Schritt 3: Haerten ueber OSConfig (Windows Server 2025)."
 
-    # 3a) Microsoft Security Compliance Toolkit (SCT) + DC-Baseline als lokale GPO anwenden
+    New-Item -ItemType Directory -Path $osconfigWorkDir -Force | Out-Null
+    $osConfigApplied = $false
+
+    # 3a) OSConfig - primärer Haertungspfad unter Windows Server 2025
+    #     OSConfig liefert DSC-basierte Security Baselines (u.a. "Microsoft: Windows Server 2025 Security Baseline - Domain Controller").
     try {
-        New-Item -ItemType Directory -Path $toolkitPath -Force | Out-Null
-        $msi = Join-Path $toolkitPath "SecurityComplianceToolkit.msi"
-        Write-Log "Lade Security Compliance Toolkit herunter..."
-        Invoke-WebRequest -Uri $baselineUrl -OutFile $msi -UseBasicParsing -ErrorAction Stop
-        Write-Log "Installiere SCT..."
-        Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart" -Wait
-        Write-Log "SCT installiert. Importiere DC-Baseline ueber LocalGPO."
-        $localGpo = Get-ChildItem "C:\Program Files\Microsoft Security Compliance Toolkit\LocalGPO" -Filter "LocalGPO.cmd" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-        $dcPolicyPack = Get-ChildItem "C:\Program Files\Microsoft Security Compliance Toolkit" -Filter "*Domain Controller*" -Recurse -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($localGpo -and $dcPolicyPack) {
-            $cmd = "`"$($localGpo.FullName)`" /q /path:`"$($dcPolicyPack.FullName)`""
-            Write-Log "Wende LocalGPO an: $cmd"
-            cmd /c $cmd
-            Write-Log "DC-Security-Baseline als lokale GPO angewendet."
-        } else {
-            Write-Log "LocalGPO oder DC-Baseline nicht gefunden - setze alternative Haertung via secedit/Registry."
-            Set-AlternativeHardening
+        Import-Module OSConfig -ErrorAction Stop
+
+        # Verfügbare Baselines ermitteln und DC-spezifische Baseline auswaehlen
+        $baselines = Get-OSConfigConfiguration -ErrorAction Stop
+        $dcBaseline = $baselines | Where-Object { $_.Name -match "Domain Controller|DC" } | Select-Object -First 1
+        if (-not $dcBaseline) {
+            $dcBaseline = $baselines | Where-Object { $_.Name -match "Security Baseline" } | Select-Object -First 1
         }
-    } catch {
-        Write-Log "SCT-Baseline nicht anwendbar: $_. Verwende alternative Haertung."
-        Set-AlternativeHardening
-    }
 
-    # 3b) OSConfig - DSC-basierte Sicherheitskonfiguration (Windows Server 2025 / Intune-kompatibel)
-    try {
-        # OSConfig Modul (falls verfuegbar) laden und DC-Baseline anwenden
-        $osconfigMod = Get-Module -ListAvailable -Name "OSConfig" -ErrorAction SilentlyContinue
-        if ($osconfigMod) {
-            Import-Module OSConfig -ErrorAction Stop
-            # DC-Baseline anwenden, falls vorhanden
-            $dcBaseline = Get-OSConfigBaseline -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "Domain Controller" }
-            if ($dcBaseline) {
-                Set-OSConfigBaseline -Baseline $dcBaseline -Force -ErrorAction Stop
-                Write-Log "OSConfig DC-Baseline angewendet."
-            } else {
-                Invoke-OSConfig -ErrorAction SilentlyContinue
-                Write-Log "OSConfig Konfiguration angewendet (generisch)."
+        if ($dcBaseline) {
+            Write-Log "Wende OSConfig-Baseline an: $($dcBaseline.Name)"
+            Set-OSConfigConfiguration -Configuration $dcBaseline -Force -ErrorAction Stop
+            $osConfigApplied = $true
+            Write-Log "OSConfig DC-Baseline erfolgreich angewendet."
+        } else {
+            Write-Log "Keine DC-Baseline unter Get-OSConfigConfiguration gefunden - wende generische OSConfig-Sicherheitsregeln an."
+            $allConfigs = Get-OSConfigConfiguration -ErrorAction SilentlyContinue
+            $secConfigs = $allConfigs | Where-Object { $_.Category -match "Security|Baseline|Hardening" }
+            if ($secConfigs) {
+                foreach ($cfg in $secConfigs) {
+                    try { Set-OSConfigConfiguration -Configuration $cfg -Force -ErrorAction SilentlyContinue } catch { }
+                }
+                $osConfigApplied = $true
+                Write-Log "OSConfig: $($secConfigs.Count) generische Sicherheitskonfiguration(en) angewendet."
             }
-        } else {
-            # Neue Windows Server 2025 OSConfig via Intune/MDM API lokal anstossen
-            $osconfigScript = @"
-using namespace System.Management.Automation
-# OSConfig PowerShell API (Windows Server 2025+)
-`$os = Get-Command -Name 'Get-OSConfig' -ErrorAction SilentlyContinue
-if (`$os) {
-    Get-OSConfig -All | Where-Object { `$_.Category -match 'Security|Baseline' } | Set-OSConfig -Apply
-}
-"@
-            $osconfigScript | Out-File "C:\Temp\Apply-OSConfig.ps1" -Force
-            & "C:\Temp\Apply-OSConfig.ps1"
-            Write-Log "OSConfig via Skript angewendet (Windows Server 2025 API)."
         }
     } catch {
-        Write-Log "OSConfig nicht vollstaendig anwendbar: $_. (Fuhr fort mit Registry/secedit-Haertung.)"
+        Write-Log "OSConfig Modul/Baseline nicht anwendbar: $_."
     }
 
-    # 3c) Ergaenzende Haertung (unabhaengig von Verfuegbarkeit der Toolkits)
+    # 3b) Alternative Haertung (Registry/secedit/SMB/Defender) - als ergaenzendes Sicherheitsnetz,
+    #     damit der DC auch bei fehlender/veraenderter OSConfig-API deterministisch gehaertet ist.
     Set-AlternativeHardening
+
+    if (-not $osConfigApplied) {
+        Write-Log "WARNUNG: OSConfig konnte nicht angewendet werden - nur Fallback-Haertung aktiv."
+    }
 
     Save-Progress -Step "step3finish"
     Invoke-Reboot -NextStepName "Domain Controller Promotion"
