@@ -115,8 +115,6 @@ function Set-GermanLocalization {
     # Tastaturlayout auf Deutsch (Standard) setzen
     Set-WinUserLanguageList -LanguageList de-DE -Force
 
-    Set-SystemPreferredUILanguage de-DE
-
     Copy-UserInternationalSettingsFromSystem -WelcomeScreen $true -NewUserTemplate $true
 
     Write-Log "Deutsche Lokalisierung gesetzt (Region, Tastatur, UI-Sprache, Welcome Screen, Default User)."
