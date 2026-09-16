@@ -128,14 +128,48 @@ function Set-StaticIPConfig {
     }
     $nic = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1
     if (-not $nic) { Write-Log "Keine aktive Netzwerkkarte gefunden - ueberspringe IP-Konfiguration."; return }
-    $prefix = (Get-NetIPAddress -InterfaceIndex $nic.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.PrefixLength }).PrefixLength
+    $ifIndex = $nic.ifIndex
+    $prefix  = (Get-NetIPAddress -InterfaceIndex $ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.PrefixLength } | Select-Object -First 1).PrefixLength
     if (-not $prefix) { $prefix = 24 }
     Write-Log "Setze statische IP $StaticIP/$prefix an Interface '$($nic.Name)'."
-    $ifIndex = $nic.ifIndex
-    Remove-NetIPAddress   -InterfaceIndex $ifIndex -Confirm:$false -ErrorAction SilentlyContinue
-    Remove-NetRoute      -InterfaceIndex $ifIndex -Confirm:$false -ErrorAction SilentlyContinue
-    New-NetIPAddress     -InterfaceIndex $ifIndex -IPAddress $StaticIP -PrefixLength $prefix -DefaultGateway $DefaultGateway | Out-Null
-    Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses @($DnsServer) | Out-Null
+
+    # IP-Adresse ohne vorheriges Entsetzen setzen: anpassen, falls bereits eine konfiguriert ist,
+    # sonst neu anlegen. So bleibt die bestehende Verbindung erhalten (kein DHCP-Release).
+    $existingIP = Get-NetIPAddress -InterfaceIndex $ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                  Where-Object { $_.IPAddress -notmatch '^169\.254\.' } | Select-Object -First 1
+    if ($existingIP) {
+        # Bestehende IPv4-Konfiguration anpassen (PrefixLength wird mitgegeben)
+        if ($existingIP.IPAddress -ne $StaticIP) {
+            Set-NetIPAddress -InterfaceIndex $ifIndex -IPAddress $StaticIP -PrefixLength $prefix -ErrorAction SilentlyContinue |
+                Out-Null
+            Write-Log "Bestehende IP $($existingIP.IPAddress) durch $StaticIP ersetzt."
+        } else {
+            Write-Log "IP $StaticIP bereits konfiguriert."
+        }
+    } else {
+        New-NetIPAddress -InterfaceIndex $ifIndex -IPAddress $StaticIP -PrefixLength $prefix -ErrorAction Stop |
+            Out-Null
+        Write-Log "Statische IP $StaticIP neu angelegt."
+    }
+
+    # Default Gateway setzen, falls angegeben. Vorhandenes Gateway anpassen statt alle Routes loeschen.
+    if (-not [string]::IsNullOrWhiteSpace($DefaultGateway)) {
+        $curGw = (Get-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Select-Object -First 1).NextHop
+        if ($curGw -and $curGw -ne $DefaultGateway) {
+            # Bestehende Default-Route anpassen (NextHop aendern) ohne Route zu loeschen
+            Set-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix '0.0.0.0/0' -NextHop $DefaultGateway -ErrorAction SilentlyContinue |
+                Out-Null
+            Write-Log "Default Gateway von $curGw auf $DefaultGateway geaendert."
+        } elseif (-not $curGw) {
+            New-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix '0.0.0.0/0' -NextHop $DefaultGateway -ErrorAction Stop |
+                Out-Null
+            Write-Log "Default Gateway $DefaultGateway neu angelegt."
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($DnsServer)) {
+        Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses @($DnsServer) | Out-Null
+    }
 }
 
 # --- Schritt 1: Initialisierung --------------------------------------------
