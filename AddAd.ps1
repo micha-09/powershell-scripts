@@ -18,7 +18,8 @@
     Voraussetzungen:
       - Ausfuehrung als SYSTEM (z.B. ueber geplante Aufgabe mit RunLevel Highest)
       - Windows Server 2025 (Desktop Experience oder Server Core) - Haertung erfolgt rein ueber OSConfig
-      - Internetzugang fuer OSConfig-Baseline-Download (falls erforderlich)
+      - PowerShell-Modul 'Microsoft.OSConfig' muss VOR der Skriptausfuehrung auf dem Server installiert sein
+        (Skript bricht in Schritt 3 ab, falls das Modul fehlt)
       - Statische IP / DNS konfigurierbar (wird vom Skript gesetzt, falls gewuenscht)
 
 .PARAMETER DomainName
@@ -243,17 +244,26 @@ function Step-Optimize {
 function Step-Harden {
     Write-Log "Schritt 3: Haerten ueber OSConfig (Windows Server 2025)."
 
-    # OSConfig: Modul installieren und DC-Security-Baseline als Desired Configuration anwenden.
+    # OSConfig: Voraussetzung ist das vorab installierte Modul 'Microsoft.OSConfig'.
+    # Es wird NICHT durch dieses Skript installiert - fehlt es, wird Schritt 3 abgebrochen,
+    # damit der DC nicht ohne Haertung weiter hochgestuft wird.
+    if (-not (Get-Module -ListAvailable -Name Microsoft.OSConfig)) {
+        Write-Log "ABBRUCH: Modul 'Microsoft.OSConfig' ist nicht installiert. Es muss vor der Skriptausfuehrung auf dem Server installiert sein."
+        throw "Voraussetzung nicht erfuellt: Microsoft.OSConfig Modul fehlt. Installation vorab erforderlich."
+    }
+    Write-Log "OSConfig-Modul gefunden. Importiere..."
+    Import-Module Microsoft.OSConfig -ErrorAction Stop
+
+    # DC-Security-Baseline als Desired Configuration anwenden.
     # Windows Server 2025 stellt DSC-basierte Security Baselines bereit; der Scenario-Pfad
     # "SecurityBaseline/WindowsServer/2025/DomainController" haertet den Server passend fuer einen DC.
     try {
-        Write-Log "Installiere OSConfig-Modul..."
-        Install-Module -Name Microsoft.OSConfig -Scope AllUsers -Force -ErrorAction Stop
         Write-Log "Wende OSConfig DC-Security-Baseline an (Scenario SecurityBaseline/WindowsServer/2025/DomainController)..."
         Set-OSConfigDesiredConfiguration -Scenario "SecurityBaseline/WindowsServer/2025/DomainController" -Default -ErrorAction Stop
         Write-Log "OSConfig DC-Security-Baseline erfolgreich angewendet."
     } catch {
-        Write-Log "OSConfig konnte nicht angewendet werden: $_"
+        Write-Log "OSConfig-Baseline konnte nicht angewendet werden: $_"
+        throw $_
     }
 
     Save-Progress -Step "step3finish"
