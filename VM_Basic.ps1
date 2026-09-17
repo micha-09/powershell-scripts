@@ -119,7 +119,6 @@ function Set-GermanLocalization {
     Set-Culture de-DE
     Set-WinHomeLocation -GeoId 94
     Set-WinUserLanguageList -LanguageList de-DE -Force
-    Set-SystemPreferredUILanguage de-DE
     Copy-UserInternationalSettingsToSystem -WelcomeScreen $true -NewUser $true
     
     Write-Log "Deutsche Lokalisierung gesetzt (Region, Tastatur, UI-Sprache)."
@@ -138,7 +137,6 @@ try {
     Set-Culture de-DE -Verbose
     Set-WinHomeLocation -GeoId 94 -Verbose
     Set-WinUserLanguageList -LanguageList de-DE -Force -Verbose
-    Set-SystemPreferredUILanguage de-DE -Verbose
     Add-Content -Path 'C:\Temp\VM_Basic_$(Get-Date -Format 'yyyyMMdd').log' -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | Lokalisierung fuer Benutzer '$LocalAdminName' angewendet (Anmelde-Task)."
 } catch {
     Add-Content -Path 'C:\Temp\VM_Basic_$(Get-Date -Format 'yyyyMMdd').log' -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | Fehler bei Lokalisierung fuer '$LocalAdminName': `$_"
