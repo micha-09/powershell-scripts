@@ -145,6 +145,8 @@ try {
 } finally {
     Unregister-ScheduledTask -TaskName '$userTaskName' -Confirm:`$false -ErrorAction SilentlyContinue
     Add-Content -Path 'C:\Temp\VM_Basic_$(Get-Date -Format 'yyyyMMdd').log' -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | Anmelde-Task '$userTaskName' entfernt."
+    Add-Content -Path 'C:\Temp\VM_Basic_$(Get-Date -Format 'yyyyMMdd').log' -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | Starte Neustart nach Lokalisierung."
+    shutdown /r /t 5
 }
 "@
 
