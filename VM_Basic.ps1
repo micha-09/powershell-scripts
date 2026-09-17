@@ -122,7 +122,8 @@ function Set-GermanLocalization {
     Set-WinHomeLocation -GeoId 94 -Verbose 4>&1 | ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
     Set-WinUserLanguageList -LanguageList de-DE -Force -Verbose 4>&1 | ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
     Set-SystemPreferredUILanguage de-DE -Verbose 4>&1 | ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
-
+    Copy-UserInternationalSettingsToSystem -WelcomeScreen $true -NewUser $true -Verbose 4>&1 | ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    
     Write-Log "Deutsche Lokalisierung gesetzt (Region, Tastatur, UI-Sprache)."
 }
 
