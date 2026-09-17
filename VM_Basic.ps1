@@ -152,7 +152,7 @@ try {
     $action    = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encodedCmd"
     $trigger   = New-ScheduledTaskTrigger -AtLogOn -User "$env:COMPUTERNAME\$LocalAdminName"
     $principal = New-ScheduledTaskPrincipal -UserId $LocalAdminName -LogonType Interactive -RunLevel Highest
-    $settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -DeleteExpiredTaskAfter (New-TimeSpan -Seconds 0)
+    $settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd
     Register-ScheduledTask -TaskName $userTaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
     Write-Log "Einmaliger Anmelde-Task '$userTaskName' registriert fuer '$LocalAdminName' (loescht sich selbst nach Ausfuehrung)."
 }
