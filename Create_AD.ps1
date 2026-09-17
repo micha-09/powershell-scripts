@@ -1,0 +1,338 @@
+<#
+.SYNOPSIS
+    AD-Erstellung: Server zum Domain Controller hochstufen und Domaene mit Musterdaten befuellen.
+
+.DESCRIPTION
+    Das Skript wird als SYSTEM ausgefuehrt und durchlaeuft mehrere Schritte, die durch geplante
+    Aufgaben (Scheduled Tasks) und Neustarts voneinander getrennt sind. Es setzt voraus, dass
+    der Server vorher mit VM_Basic.ps1 optimiert und gehaertet wurde.
+
+      Schritt 1: DC hochstufen  (AD DS + DNS installieren, Forest erstellen)
+      Schritt 2: Domaene befuellen (OUs, Gruppen, Benutzer, Computer als Musterdaten)
+      Schritt 3: Aufraeumen     (geplante Aufgabe entfernen, Fortschrittsdatei loeschen)
+
+    Nach Abschluss steht ein fertiger, gehaerteter Domain Controller bereit.
+
+    Wo moeglich werden Befehle mit -Verbose ausgefuehrt und die Ausgabe ins Log geschrieben.
+
+    Voraussetzungen:
+      - Ausfuehrung als SYSTEM (z.B. ueber geplante Aufgabe mit RunLevel Highest)
+      - Vorheriger Durchlauf von VM_Basic.ps1 (Optimierung + Haertung)
+      - Windows Server 2025
+
+.PARAMETER DomainName
+    FQDN der neuen Gesamtstruktur (z.B. corp.example.com).
+
+.PARAMETER NetBiosName
+    NetBIOS-Domaenenname (z.B. CORP).
+
+.PARAMETER DsrmPassword
+    Kennwort fuer den Verzeichnisdienst-Wiederherstellungsmodus (DSRM).
+
+.PARAMETER DemoUserCount
+    Anzahl der Musterbenutzer, die in Schritt 2 angelegt werden.
+
+.EXAMPLE
+    powershell.exe -ExecutionPolicy Bypass -File .\Create_AD.ps1 -DomainName "corp.example.com" -NetBiosName "CORP" -DsrmPassword "P@ssw0rd!2025"
+#>
+
+[CmdletBinding()]
+param (
+    [string]$DomainName      = "corp.example.com",
+    [string]$NetBiosName      = "CORP",
+    [string]$DsrmPassword     = "P@ssw0rd!2025",
+    [int]   $DemoUserCount    = 25
+)
+
+$ErrorActionPreference = "Stop"
+$ProgressPreference    = "SilentlyContinue"
+
+# --- Globale Konfiguration -------------------------------------------------
+$scriptPath    = $PSCommandPath
+if (-not $scriptPath) { $scriptPath = $MyInvocation.MyCommand.Path }
+$progressFile  = "C:\Temp\Create_AD_progress.txt"
+$scriptLog     = "C:\Temp\Create_AD_$(Get-Date -Format 'yyyyMMdd').log"
+$taskName      = "RunCreateADAfterRestart"
+
+# --- Hilfsfunktionen --------------------------------------------------------
+function Write-Log {
+    param([string]$Message)
+    $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | $Message"
+    Write-Host $line
+    Add-Content -Path $scriptLog -Value $line -ErrorAction SilentlyContinue
+}
+
+function Save-Progress {
+    param([string]$Step)
+    $Step | Out-File -FilePath $progressFile -Force
+    Write-Log "Fortschritt gespeichert: $Step"
+}
+
+function Invoke-Reboot {
+    param([string]$NextStepName)
+    Write-Log "Starte Neustart (naechster Schritt: $NextStepName)..."
+    Restart-Computer -Force
+}
+
+function Create-ScheduledTask {
+    Write-Log "Erzeuge geplante Aufgabe '$taskName' fuer den Autostart nach Neustart."
+    $action    = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -DomainName `"$DomainName`" -NetBiosName `"$NetBiosName`" -DsrmPassword `"$DsrmPassword`" -DemoUserCount $DemoUserCount"
+    $trigger   = New-ScheduledTaskTrigger -AtStartup
+    $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+    $settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force -Verbose 4>&1 |
+        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+}
+
+function Remove-ScheduledTask {
+    Write-Log "Entferne geplante Aufgabe '$taskName'."
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue -Verbose 4>&1 |
+        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+}
+
+# --- Schritt 1: Domain Controller hochstufen -------------------------------
+function Step-Promote {
+    Write-Log "Schritt 1: Server zum Domain Controller hochstufen."
+
+    # AD DS und DNS Rollen installieren
+    Write-Log "Installiere Windows-Features AD-Domain-Services und DNS..."
+    Install-WindowsFeature -Name AD-Domain-Services, DNS -IncludeManagementTools -Verbose 4>&1 |
+        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+
+    # Pruefen, ob bereits DC ist
+    $isDC = (Get-CimInstance Win32_ComputerSystem).DomainRole -ge 4
+    if ($isDC) {
+        Write-Log "Server ist bereits Domain Controller - Promotion uebersprungen."
+    } else {
+        $secureDsrm = ConvertTo-SecureString $DsrmPassword -AsPlainText -Force
+        Write-Log "Erstelle neue Gesamtstruktur '$DomainName' (NetBIOS $NetBiosName)..."
+        Install-ADDSForest `
+            -DomainName $DomainName `
+            -DomainNetbiosName $NetBiosName `
+            -SafeModeAdministratorPassword $secureDsrm `
+            -InstallDNS `
+            -NoRebootOnCompletion `
+            -Force `
+            -ErrorAction Stop `
+            -Verbose 4>&1 |
+            ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+        Write-Log "Neue Gesamtstruktur erstellt."
+    }
+
+    Save-Progress -Step "step1finish"
+    Invoke-Reboot -NextStepName "Promotion abschliessen & Musterdaten"
+}
+
+# --- Schritt 2: Domaene mit Musterdaten befuellen --------------------------
+function Step-Populate {
+    Write-Log "Schritt 2: Musterdaten in die Domaene laden."
+
+    # AD-Module sicherstellen
+    if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
+        Write-Log "ActiveDirectory Modul fehlt - installiere RSAT."
+        Install-WindowsFeature -Name RSAT-AD-PowerShell -ErrorAction SilentlyContinue -Verbose 4>&1 |
+            ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    }
+    Import-Module ActiveDirectory -ErrorAction Stop -Verbose 4>&1 |
+        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+
+    # Warte, bis der DC nach dem Reboot voll verfuegbar ist
+    $retries = 0
+    while (-not (Get-Service -Name NTDS -ErrorAction SilentlyContinue) -and $retries -lt 30) {
+        Start-Sleep -Seconds 10; $retries++
+    }
+    Start-Sleep -Seconds 15
+
+    $domainDN = "DC=" + ($DomainName -split '\.' -join ",DC=")
+    $baseDN   = $domainDN
+    $adServer = $env:COMPUTERNAME
+
+    # UPN-Suffix setzen
+    try {
+        Set-ADForest -Identity $NetBiosName -UPNSuffixes @{ Replace = $DomainName } -Server $adServer -ErrorAction SilentlyContinue -Verbose 4>&1 |
+            ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    } catch { Write-Log "UPN-Suffix nicht gesetzt: $_" }
+
+    # OUs anlegen
+    $ouList = @(
+        @{ Name = "Unternehmen";       Path = $baseDN },
+        @{ Name = "Benutzer";          Path = "OU=Unternehmen,$baseDN" },
+        @{ Name = "Administratoren";   Path = "OU=Benutzer,OU=Unternehmen,$baseDN" },
+        @{ Name = "ServiceAccounts";  Path = "OU=Unternehmen,$baseDN" },
+        @{ Name = "Gruppen";           Path = "OU=Unternehmen,$baseDN" },
+        @{ Name = "Server";            Path = "OU=Unternehmen,$baseDN" },
+        @{ Name = "Clients";           Path = "OU=Unternehmen,$baseDN" },
+        @{ Name = "Computer";          Path = "OU=Unternehmen,$baseDN" }
+    )
+    foreach ($ou in $ouList) {
+        try {
+            if (-not (Get-ADOrganizationalUnit -Filter "Name -eq '$($ou.Name)'" -SearchBase $ou.Path -Server $adServer -ErrorAction SilentlyContinue)) {
+                New-ADOrganizationalUnit -Name $ou.Name -Path $ou.Path -Server $adServer -ErrorAction Stop -Verbose 4>&1 |
+                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+                Write-Log "OU angelegt: $($ou.Name) ($($ou.Path))"
+            }
+        } catch { Write-Log "OU '$($ou.Name)' nicht angelegt: $_" }
+    }
+
+    # Sicherheitsgruppen anlegen
+    $groups = @(
+        @{ Name = "GG_IT_Admin";       Desc = "IT Administratoren";       Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
+        @{ Name = "GG_Helpdesk";       Desc = "Helpdesk-Mitarbeiter";     Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
+        @{ Name = "GG_Mitarbeiter";    Desc = "Alle Mitarbeiter";         Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
+        @{ Name = "GG_Finanzen";       Desc = "Finanzabteilung";          Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
+        @{ Name = "GG_Entwicklung";    Desc = "Entwickler";               Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
+        @{ Name = "GG_ServerAdmin";    Desc = "Server-Administratoren";    Path = "OU=Gruppen,OU=Unternehmen,$baseDN" }
+    )
+    foreach ($g in $groups) {
+        try {
+            if (-not (Get-ADGroup -Identity $g.Name -Server $adServer -ErrorAction SilentlyContinue)) {
+                New-ADGroup -Name $g.Name -GroupCategory Security -GroupScope Global -Description $g.Desc -Path $g.Path -Server $adServer -ErrorAction Stop -Verbose 4>&1 |
+                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+                Write-Log "Gruppe angelegt: $($g.Name)"
+            }
+        } catch { Write-Log "Gruppe '$($g.Name)' nicht angelegt: $_" }
+    }
+
+    # Musterbenutzer anlegen
+    $depts = @("IT","Helpdesk","Finanzen","Entwicklung","Vertrieb","HR")
+    $securePwd = ConvertTo-SecureString "P@ssw0rd!2025" -AsPlainText -Force
+    $userOU = "OU=Benutzer,OU=Unternehmen,$baseDN"
+    for ($i = 1; $i -le $DemoUserCount; $i++) {
+        $dept   = $depts[(($i - 1) % $depts.Count)]
+        $fn     = "Demo"
+        $ln     = "User{0:D2}" -f $i
+        $uname  = "$fn.$ln"
+        $upn    = "$uname@$DomainName"
+        try {
+            if (-not (Get-ADUser -Identity $uname -Server $adServer -ErrorAction SilentlyContinue)) {
+                New-ADUser `
+                    -Name $uname `
+                    -GivenName $fn `
+                    -Surname $ln `
+                    -DisplayName "$fn $ln" `
+                    -SamAccountName $uname `
+                    -UserPrincipalName $upn `
+                    -Path $userOU `
+                    -AccountPassword $securePwd `
+                    -Enabled $true `
+                    -Department $dept `
+                    -Server $adServer `
+                    -ErrorAction Stop `
+                    -Verbose 4>&1 |
+                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+                $grp = switch ($dept) {
+                    "IT"          { "GG_IT_Admin" }
+                    "Helpdesk"    { "GG_Helpdesk" }
+                    "Finanzen"    { "GG_Finanzen" }
+                    "Entwicklung" { "GG_Entwicklung" }
+                    default       { "GG_Mitarbeiter" }
+                }
+                Add-ADGroupMember -Identity $grp -Members $uname -Server $adServer -ErrorAction SilentlyContinue -Verbose 4>&1 |
+                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+                Add-ADGroupMember -Identity "GG_Mitarbeiter" -Members $uname -Server $adServer -ErrorAction SilentlyContinue -Verbose 4>&1 |
+                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+                Write-Log "Benutzer angelegt: $uname ($dept -> $grp)"
+            }
+        } catch { Write-Log "Benutzer '$uname' nicht angelegt: $_" }
+    }
+
+    # Service-Accounts (gMSA-geeignete Konten als Muster)
+    $svcOU = "OU=ServiceAccounts,OU=Unternehmen,$baseDN"
+    $svcAccounts = @("svc_backup","svc_monitoring","svc_join","svc_print")
+    foreach ($svc in $svcAccounts) {
+        try {
+            if (-not (Get-ADUser -Identity $svc -Server $adServer -ErrorAction SilentlyContinue)) {
+                New-ADUser `
+                    -Name $svc `
+                    -SamAccountName $svc `
+                    -UserPrincipalName "$svc@$DomainName" `
+                    -Path $svcOU `
+                    -AccountPassword $securePwd `
+                    -Enabled $true `
+                    -Description "Service-Konto (Muster)" `
+                    -Server $adServer `
+                    -Verbose 4>&1 |
+                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+                Write-Log "Service-Konto angelegt: $svc"
+            }
+        } catch { Write-Log "Service-Konto '$svc' nicht angelegt: $_" }
+    }
+
+    # Muster-Computerkonten (Clients) anlegen
+    $clientOU = "OU=Clients,OU=Unternehmen,$baseDN"
+    for ($i = 1; $i -le 10; $i++) {
+        $cname = "CL-WS{0:D3}" -f $i
+        try {
+            if (-not (Get-ADComputer -Identity $cname -Server $adServer -ErrorAction SilentlyContinue)) {
+                New-ADComputer -Name $cname -Path $clientOU -Description "Muster-Client $i" -Server $adServer -ErrorAction Stop -Verbose 4>&1 |
+                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+                Write-Log "Computerkonto angelegt: $cname"
+            }
+        } catch { Write-Log "Computerkonto '$cname' nicht angelegt: $_" }
+    }
+
+    # Muster-Serverkonten
+    $serverOU = "OU=Server,OU=Unternehmen,$baseDN"
+    for ($i = 1; $i -le 5; $i++) {
+        $cname = "SRV-APP{0:D2}" -f $i
+        try {
+            if (-not (Get-ADComputer -Identity $cname -Server $adServer -ErrorAction SilentlyContinue)) {
+                New-ADComputer -Name $cname -Path $serverOU -Description "Muster-Server $i" -Server $adServer -ErrorAction Stop -Verbose 4>&1 |
+                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+                Write-Log "Server-Konto angelegt: $cname"
+            }
+        } catch { Write-Log "Server-Konto '$cname' nicht angelegt: $_" }
+    }
+
+    # GPO fuer Password-Richtlinie als additional hardening
+    try {
+        $gpoName = "Domaenen-Passwortrichtlinie"
+        if (-not (Get-GPO -Name $gpoName -ErrorAction SilentlyContinue)) {
+            New-GPO -Name $gpoName -Verbose 4>&1 | ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+            Set-GPRegistryValue -Name $gpoName -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\PasswordPolicy" -ValueName "MinimumPasswordLength" -Type DWord -Value 14 -ErrorAction SilentlyContinue -Verbose 4>&1 |
+                ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+            New-GPLink -Name $gpoName -Target $baseDN -LinkEnabled Yes -Verbose 4>&1 |
+                ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+            Write-Log "GPO '$gpoName' erstellt und verlinkt."
+        }
+    } catch { Write-Log "GPO nicht erstellt: $_" }
+
+    Write-Log "Musterdaten erfolgreich in die Domaene geladen."
+    Save-Progress -Step "step2finish"
+    Invoke-Reboot -NextStepName "Abschluss"
+}
+
+# --- Schritt 3: Aufraeumen -------------------------------------------------
+function Step-Cleanup {
+    Write-Log "Schritt 3: Aufraeumen - Domaene ist fertig."
+    Remove-ScheduledTask
+    Remove-Item -Path $progressFile -Force -ErrorAction SilentlyContinue -Verbose 4>&1 |
+        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    # Letzte GPO-Verifikation nach Abschluss
+    try {
+        gpupdate /force 2>$null | Out-Null
+        Write-Log "Gruppenrichtlinien aktualisiert."
+    } catch { }
+    Write-Log "Skript abgeschlossen. Domain Controller $NetBiosName ($DomainName) ist einsatzbereit."
+}
+
+# --- Hauptsteuerung --------------------------------------------------------
+try {
+    $current = if (Test-Path $progressFile) { (Get-Content $progressFile -Raw).Trim() } else { "" }
+
+    switch ($current) {
+        ""            { Create-ScheduledTask; Step-Promote }
+        "step1finish" { Step-Populate }
+        "step2finish" { Step-Cleanup }
+        default {
+            Write-Log "Unbekannter Fortschrittsstatus '$current'. Breche ab."
+            Remove-ScheduledTask
+            throw "Ungueltiger Fortschritt: $current"
+        }
+    }
+}
+catch {
+    Write-Log "Fehler aufgetreten: $($_.Exception.Message)"
+    Write-Log "Stack: $($_.ScriptStackTrace)"
+    exit 1
+}
