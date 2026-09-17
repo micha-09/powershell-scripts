@@ -122,9 +122,41 @@ function Set-GermanLocalization {
     Set-WinHomeLocation -GeoId 94 -Verbose 4>&1 | ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
     Set-WinUserLanguageList -LanguageList de-DE -Force -Verbose 4>&1 | ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
     Set-SystemPreferredUILanguage de-DE -Verbose 4>&1 | ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
-    Copy-UserInternationalSettingsToSystem -WelcomeScreen $true -NewUser $true -Verbose 4>&1 | ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
 
-    Write-Log "Deutsche Lokalisierung gesetzt (Region, Tastatur, UI-Sprache, Welcome Screen, Default User)."
+    Write-Log "Deutsche Lokalisierung gesetzt (Region, Tastatur, UI-Sprache)."
+}
+
+# --- Lokalisierung fuer existierendes Admin-Konto beim Anmelden (einmalig) --
+# Legt einen Scheduled Task an, der Set-GermanLocalization bei der Anmeldung von
+# $LocalAdminName ausfuehrt und sich danach selbst loescht (einmalig).
+function Register-LocalizationUserTask {
+    $userTaskName = "ApplyGermanLocalization_$LocalAdminName"
+    Write-Log "Lege einmaligen Anmelde-Task '$userTaskName' fuer Benutzer '$LocalAdminName' an."
+
+    # Inline-Skript: Lokalisierung anwenden, dann den Task selbst entfernen.
+    $inlineScript = @"
+try {
+    Set-Culture de-DE -Verbose
+    Set-WinHomeLocation -GeoId 94 -Verbose
+    Set-WinUserLanguageList -LanguageList de-DE -Force -Verbose
+    Set-SystemPreferredUILanguage de-DE -Verbose
+    Add-Content -Path 'C:\Temp\VM_Basic_$(Get-Date -Format 'yyyyMMdd').log' -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | Lokalisierung fuer Benutzer '$LocalAdminName' angewendet (Anmelde-Task)."
+} catch {
+    Add-Content -Path 'C:\Temp\VM_Basic_$(Get-Date -Format 'yyyyMMdd').log' -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | Fehler bei Lokalisierung fuer '$LocalAdminName': `$_"
+} finally {
+    Unregister-ScheduledTask -TaskName '$userTaskName' -Confirm:`$false -ErrorAction SilentlyContinue
+    Add-Content -Path 'C:\Temp\VM_Basic_$(Get-Date -Format 'yyyyMMdd').log' -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | Anmelde-Task '$userTaskName' entfernt."
+}
+"@
+
+    $encodedCmd = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inlineScript))
+    $action    = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encodedCmd"
+    $trigger   = New-ScheduledTaskTrigger -AtLogOn -User "$env:COMPUTERNAME\$LocalAdminName"
+    $principal = New-ScheduledTaskPrincipal -UserId $LocalAdminName -LogonType Interactive -RunLevel Highest
+    $settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -DeleteExpiredTaskAfter (New-TimeSpan -Seconds 0)
+    Register-ScheduledTask -TaskName $userTaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force -Verbose 4>&1 |
+        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    Write-Log "Einmaliger Anmelde-Task '$userTaskName' registriert fuer '$LocalAdminName' (loescht sich selbst nach Ausfuehrung)."
 }
 
 function Set-StaticIPConfig {
@@ -208,6 +240,10 @@ function Step-Optimize {
     # Deutsche Lokalisierung / regionale Einstellungen fuer alle Benutzer, zukuenftige
     # Benutzer und den Welcome Screen (auf englischen Server-OS).
     Set-GermanLocalization
+
+    # Lokalisierung fuer das bereits existierende Admin-Benutzerkonto ($LocalAdminName)
+    # nachtraeglich beim naechsten Anmelden aktivieren (einmaliger Task, der sich selbst loescht).
+    Register-LocalizationUserTask
 
     # Ueberfluessige Dienste deaktivieren (Beispiele, die auf einem DC nicht benoetigt werden)
     $servicesToDisable = @(
