@@ -8,22 +8,17 @@
 
       Schritt 1: Initialisierung   (geplante Aufgabe anlegen, ggf. statische IP setzen, Basis-Konfig)
       Schritt 2: Server optimieren  (Powerplan, Dienste, Updates, Zeitzone, deutsche Lokalisierung, etc.)
-      Schritt 3: Haerten           (OSConfig Security Baseline, Windows Server 2025)
-      Schritt 4: Aufraeumen        (geplante Aufgabe entfernen, Fortschrittsdatei loeschen)
+      Schritt 3: Aufraeumen        (geplante Aufgabe entfernen, Fortschrittsdatei loeschen)
 
-    Nach Abschluss steht ein fertig optimierter und gehaerteter Server bereit, der anschliessend
-    z.B. mit Create_AD.ps1 zum Domain Controller hochgestuft werden kann.
+    Nach Abschluss steht ein fertig optimierter Server bereit, der anschliessend
+    z.B. mit Create_AD.ps1 zum Domain Controller hochgestuft wird (Haertung dort).
 
     Das Setzen einer statischen IP wird auf in Azure erstellten Maschinen automatisch
     uebersprungen (Erkennung ueber den Azure Guest Agent Dienst).
 
-    Wo moeglich werden Befehle mit -Verbose ausgefuehrt und die Ausgabe ins Log geschrieben.
-
     Voraussetzungen:
       - Ausfuehrung als SYSTEM (z.B. ueber geplante Aufgabe mit RunLevel Highest)
-      - Windows Server 2025 (Desktop Experience oder Server Core) - Haertung erfolgt rein ueber OSConfig
-      - PowerShell-Modul 'Microsoft.OSConfig' muss VOR der Skriptausfuehrung auf dem Server installiert sein
-        (Skript bricht in Schritt 3 ab, falls das Modul fehlt)
+      - Windows Server 2025 (Desktop Experience oder Server Core)
       - Statische IP / DNS konfigurierbar (wird vom Skript gesetzt, falls gewuenscht und NICHT in Azure)
 
 .PARAMETER StaticIP
@@ -299,39 +294,12 @@ function Step-Optimize {
     } catch { Write-Log "Lokaler Administrator nicht angepasst: $_" }
 
     Save-Progress -Step "step2finish"
-    Invoke-Reboot -NextStepName "Haertung"
-}
-
-# --- Schritt 3: Haerten (OSConfig, Windows Server 2025) -------------------
-function Step-Harden {
-    Write-Log "Schritt 3: Haerten ueber OSConfig (Windows Server 2025)."
-
-    # OSConfig: Voraussetzung ist das vorab installierte Modul 'Microsoft.OSConfig'.
-    # Es wird NICHT durch dieses Skript installiert - fehlt es, wird Schritt 3 abgebrochen.
-    if (-not (Get-Module -ListAvailable -Name Microsoft.OSConfig)) {
-        Write-Log "ABBRUCH: Modul 'Microsoft.OSConfig' ist nicht installiert. Es muss vor der Skriptausfuehrung auf dem Server installiert sein."
-        throw "Voraussetzung nicht erfuellt: Microsoft.OSConfig Modul fehlt. Installation vorab erforderlich."
-    }
-    Write-Log "OSConfig-Modul gefunden. Importiere..."
-    Import-Module Microsoft.OSConfig -ErrorAction Stop
-
-    # DC-Security-Baseline als Desired Configuration anwenden.
-    try {
-        Write-Log "Wende OSConfig Security-Baseline an (Scenario SecurityBaseline/WindowsServer/2025/WorkgroupMember)..."
-        Set-OSConfigDesiredConfiguration -Scenario SecurityBaseline/WindowsServer/2025/WorkgroupMember -Default -ErrorAction Stop
-        Write-Log "OSConfig Security-Baseline (WorkgroupMember) erfolgreich angewendet."
-    } catch {
-        Write-Log "OSConfig-Baseline konnte nicht angewendet werden: $_"
-        throw $_
-    }
-
-    Save-Progress -Step "step3finish"
     Invoke-Reboot -NextStepName "Abschluss"
 }
 
-# --- Schritt 4: Aufraeumen -------------------------------------------------
+# --- Schritt 3: Aufraeumen -------------------------------------------------
 function Step-Cleanup {
-    Write-Log "Schritt 4: Aufraeumen - Server ist optimiert und gehaertet."
+    Write-Log "Schritt 3: Aufraeumen - Server ist optimiert."
     Remove-ScheduledTask
     Remove-Item -Path $progressFile -Force -ErrorAction SilentlyContinue
     Write-Log "Skript abgeschlossen. Server ist einsatzbereit (z.B. fuer Create_AD.ps1)."
@@ -344,8 +312,7 @@ try {
     switch ($current) {
         ""            { Step-Init }
         "step1finish" { Step-Optimize }
-        "step2finish" { Step-Harden }
-        "step3finish" { Step-Cleanup }
+        "step2finish" { Step-Cleanup }
         default {
             Write-Log "Unbekannter Fortschrittsstatus '$current'. Breche ab."
             Remove-ScheduledTask
