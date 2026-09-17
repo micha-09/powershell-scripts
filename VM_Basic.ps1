@@ -92,14 +92,12 @@ function Create-ScheduledTask {
     $trigger   = New-ScheduledTaskTrigger -AtStartup
     $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
     $settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force -Verbose 4>&1 |
-        ForEach-Object { if ($_ -is [string]) { Write-Log "VERBOSE | $_" } else { $_ } } | Out-Null
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
 }
 
 function Remove-ScheduledTask {
     Write-Log "Entferne geplante Aufgabe '$taskName'."
-    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue -Verbose 4>&1 |
-        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 }
 
 # --- Azure-Erkennung ------------------------------------------------------
@@ -118,11 +116,11 @@ function Test-IsAzureVM {
 function Set-GermanLocalization {
     Write-Log "Konfiguriere deutsche Lokalisierung / regionale Einstellungen."
 
-    Set-Culture de-DE -Verbose 4>&1 | ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
-    Set-WinHomeLocation -GeoId 94 -Verbose 4>&1 | ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
-    Set-WinUserLanguageList -LanguageList de-DE -Force -Verbose 4>&1 | ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
-    Set-SystemPreferredUILanguage de-DE -Verbose 4>&1 | ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
-    Copy-UserInternationalSettingsToSystem -WelcomeScreen $true -NewUser $true -Verbose 4>&1 | ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    Set-Culture de-DE
+    Set-WinHomeLocation -GeoId 94
+    Set-WinUserLanguageList -LanguageList de-DE -Force
+    Set-SystemPreferredUILanguage de-DE
+    Copy-UserInternationalSettingsToSystem -WelcomeScreen $true -NewUser $true
     
     Write-Log "Deutsche Lokalisierung gesetzt (Region, Tastatur, UI-Sprache)."
 }
@@ -155,8 +153,7 @@ try {
     $trigger   = New-ScheduledTaskTrigger -AtLogOn -User "$env:COMPUTERNAME\$LocalAdminName"
     $principal = New-ScheduledTaskPrincipal -UserId $LocalAdminName -LogonType Interactive -RunLevel Highest
     $settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -DeleteExpiredTaskAfter (New-TimeSpan -Seconds 0)
-    Register-ScheduledTask -TaskName $userTaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force -Verbose 4>&1 |
-        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    Register-ScheduledTask -TaskName $userTaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
     Write-Log "Einmaliger Anmelde-Task '$userTaskName' registriert fuer '$LocalAdminName' (loescht sich selbst nach Ausfuehrung)."
 }
 
@@ -180,10 +177,8 @@ function Set-StaticIPConfig {
     Write-Log "Setze statische IP $StaticIP/$prefix an Interface '$($nic.Name)' (Index $ifIndex)."
 
     # 1) Adapter komplett auf DHCP zuruecksetzen (loescht alte statische IPs/Gateways/DNS)
-    Set-NetIPInterface -InterfaceIndex $ifIndex -Dhcp Enabled -ErrorAction SilentlyContinue -Verbose 4>&1 |
-        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
-    Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ResetServerAddresses -ErrorAction SilentlyContinue -Verbose 4>&1 |
-        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    Set-NetIPInterface -InterfaceIndex $ifIndex -Dhcp Enabled -ErrorAction SilentlyContinue
+    Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ResetServerAddresses -ErrorAction SilentlyContinue
 
     # 2) Neue statische IP und Gateway zuweisen
     $newIpArgs = @{
@@ -192,26 +187,22 @@ function Set-StaticIPConfig {
         PrefixLength   = $prefix
     }
     if (-not [string]::IsNullOrWhiteSpace($DefaultGateway)) { $newIpArgs['DefaultGateway'] = $DefaultGateway }
-    New-NetIPAddress @newIpArgs -ErrorAction Stop -Verbose 4>&1 |
-        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    New-NetIPAddress @newIpArgs -ErrorAction Stop
 
     # 3) Neue statische DNS-Server zuweisen
     if (-not [string]::IsNullOrWhiteSpace($DnsServer)) {
-        Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses @($DnsServer) -Verbose 4>&1 |
-            ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+        Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses @($DnsServer)
     }
 }
 
 # --- Schritt 1: Initialisierung --------------------------------------------
 function Step-Init {
     Write-Log "Schritt 1: Initialisierung."
-    New-Item -ItemType Directory -Path "C:\Temp" -Force -Verbose 4>&1 |
-        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    New-Item -ItemType Directory -Path "C:\Temp" -Force
     Add-Content -Path $scriptLog -Value "---- Neue Skriptausfuehrung gestartet $(Get-Date) ----"
     Set-StaticIPConfig
     # Ermoeglichen spaeterer RDP-Verwaltung
-    Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0 -ErrorAction SilentlyContinue -Verbose 4>&1 |
-        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0 -ErrorAction SilentlyContinue
     Create-ScheduledTask
     Save-Progress -Step "step1finish"
     Invoke-Reboot -NextStepName "Optimierung"
@@ -232,8 +223,7 @@ function Step-Optimize {
 
     # Zeitsynchronisation
     try {
-        Set-TimeZone -Id "W. Europe Standard Time" -ErrorAction SilentlyContinue -Verbose 4>&1 |
-            ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+        Set-TimeZone -Id "W. Europe Standard Time" -ErrorAction SilentlyContinue
         w32tm /config /manualpeerlist:"time.windows.com,0x1" /syncfromflags:manual /update 2>$null | Out-Null
         Write-Log "Zeitzone und NTP konfiguriert."
     } catch { Write-Log "Zeitkonfiguration fehlgeschlagen: $_" }
@@ -260,10 +250,8 @@ function Step-Optimize {
         try {
             $s = Get-Service -Name $svc -ErrorAction SilentlyContinue
             if ($s) {
-                Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue -Verbose 4>&1 |
-                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
-                Set-Service -Name $svc -StartupType Disabled -ErrorAction SilentlyContinue -Verbose 4>&1 |
-                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+                Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue
+                Set-Service -Name $svc -StartupType Disabled -ErrorAction SilentlyContinue
                 Write-Log "Dienst deaktiviert: $svc"
             }
         } catch { Write-Log "Dienst $svc konnte nicht deaktiviert werden: $_" }
@@ -273,49 +261,39 @@ function Step-Optimize {
     try {
         $wuKey = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
         if (-not (Test-Path $wuKey)) { New-Item -Path $wuKey -Force | Out-Null }
-        Set-ItemProperty -Path $wuKey -Name "NoAutoRebootWithLoggedOnUsers" -Value 1 -Type DWord -Verbose 4>&1 |
-            ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
-        Set-ItemProperty -Path $wuKey -Name "AUOptions" -Value 2 -Type DWord -Verbose 4>&1 |
-            ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+        Set-ItemProperty -Path $wuKey -Name "NoAutoRebootWithLoggedOnUsers" -Value 1 -Type DWord
+        Set-ItemProperty -Path $wuKey -Name "AUOptions" -Value 2 -Type DWord
         Write-Log "Windows Update konfiguriert (kein automatischer Reboot)."
     } catch { Write-Log "Windows Update Konfiguration fehlgeschlagen: $_" }
 
     # Unnoetige Protokollbindungen (LLTD/RSPNDR) deaktivieren
-    Disable-NetAdapterBinding -Name "*" -ComponentID "ms_rspndr","ms_lltdio" -ErrorAction SilentlyContinue -Verbose 4>&1 |
-        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    Disable-NetAdapterBinding -Name "*" -ComponentID "ms_rspndr","ms_lltdio" -ErrorAction SilentlyContinue
     Write-Log "Unnoetige Protokollbindungen (LLTD/RSPNDR) deaktiviert."
 
     # SMB1 deaktivieren (Sicherheit)
     try {
-        Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force -Verbose 4>&1 |
-            ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
-        Disable-WindowsOptionalFeature -Online -FeatureName "SMB1Protocol" -NoRestart -ErrorAction SilentlyContinue -Verbose 4>&1 |
-            ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+        Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force
+        Disable-WindowsOptionalFeature -Online -FeatureName "SMB1Protocol" -NoRestart -ErrorAction SilentlyContinue
         Write-Log "SMB1 deaktiviert."
     } catch { Write-Log "SMB1 Deaktivierung fehlgeschlagen: $_" }
 
     # Windows Defender Echtzeitschutz aktiv lassen, aber Ausschluesse fuer AD
     try {
-        Add-MpPreference -ExclusionPath "C:\Windows\NTDS","C:\Windows\SYSVOL","C:\Windows\System32\ntds.dit" -ErrorAction SilentlyContinue -Verbose 4>&1 |
-            ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+        Add-MpPreference -ExclusionPath "C:\Windows\NTDS","C:\Windows\SYSVOL","C:\Windows\System32\ntds.dit" -ErrorAction SilentlyContinue
         Write-Log "Defender-Ausschluesse fuer AD-Verzeichnisse gesetzt."
     } catch { Write-Log "Defender-Ausschluesse nicht gesetzt: $_" }
 
     # Temp bereinigen
     Get-ChildItem "C:\Windows\Temp","$env:TEMP" -ErrorAction SilentlyContinue |
-        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -Verbose 4>&1 |
-        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
     # Lokaler Administrator umbenennen und Kennwort setzen (falls vorhanden)
     try {
         $admin = Get-LocalUser | Where-Object { $_.SID -like "S-1-5-21-*-500" }
         if ($admin) {
-            Rename-LocalUser -Name $admin.Name -NewName $LocalAdminName -ErrorAction SilentlyContinue -Verbose 4>&1 |
-                ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
-            Set-LocalUser -Name $LocalAdminName -Password (ConvertTo-SecureString $LocalAdminPwd -AsPlainText -Force) -ErrorAction SilentlyContinue -Verbose 4>&1 |
-                ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
-            Enable-LocalUser -Name $LocalAdminName -ErrorAction SilentlyContinue -Verbose 4>&1 |
-                ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+            Rename-LocalUser -Name $admin.Name -NewName $LocalAdminName -ErrorAction SilentlyContinue
+            Set-LocalUser -Name $LocalAdminName -Password (ConvertTo-SecureString $LocalAdminPwd -AsPlainText -Force) -ErrorAction SilentlyContinue
+            Enable-LocalUser -Name $LocalAdminName -ErrorAction SilentlyContinue
             Write-Log "Lokaler Administrator umbenannt/aktiviert: $LocalAdminName"
         }
     } catch { Write-Log "Lokaler Administrator nicht angepasst: $_" }
@@ -335,15 +313,13 @@ function Step-Harden {
         throw "Voraussetzung nicht erfuellt: Microsoft.OSConfig Modul fehlt. Installation vorab erforderlich."
     }
     Write-Log "OSConfig-Modul gefunden. Importiere..."
-    Import-Module Microsoft.OSConfig -ErrorAction Stop -Verbose 4>&1 |
-        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    Import-Module Microsoft.OSConfig -ErrorAction Stop
 
     # DC-Security-Baseline als Desired Configuration anwenden.
     try {
-        Write-Log "Wende OSConfig DC-Security-Baseline an (Scenario SecurityBaseline/WindowsServer/2025/DomainController)..."
-        Set-OSConfigDesiredConfiguration -Scenario "SecurityBaseline/WindowsServer/2025/DomainController" -Default -ErrorAction Stop -Verbose 4>&1 |
-            ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
-        Write-Log "OSConfig DC-Security-Baseline erfolgreich angewendet."
+        Write-Log "Wende OSConfig Security-Baseline an (Scenario SecurityBaseline/WindowsServer/2025/WorkgroupMember)..."
+        Set-OSConfigDesiredConfiguration -Scenario SecurityBaseline/WindowsServer/2025/WorkgroupMember -Default -ErrorAction Stop
+        Write-Log "OSConfig Security-Baseline (WorkgroupMember) erfolgreich angewendet."
     } catch {
         Write-Log "OSConfig-Baseline konnte nicht angewendet werden: $_"
         throw $_
@@ -357,8 +333,7 @@ function Step-Harden {
 function Step-Cleanup {
     Write-Log "Schritt 4: Aufraeumen - Server ist optimiert und gehaertet."
     Remove-ScheduledTask
-    Remove-Item -Path $progressFile -Force -ErrorAction SilentlyContinue -Verbose 4>&1 |
-        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    Remove-Item -Path $progressFile -Force -ErrorAction SilentlyContinue
     Write-Log "Skript abgeschlossen. Server ist einsatzbereit (z.B. fuer Create_AD.ps1)."
 }
 

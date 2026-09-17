@@ -80,14 +80,12 @@ function Create-ScheduledTask {
     $trigger   = New-ScheduledTaskTrigger -AtStartup
     $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
     $settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force -Verbose 4>&1 |
-        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
 }
 
 function Remove-ScheduledTask {
     Write-Log "Entferne geplante Aufgabe '$taskName'."
-    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue -Verbose 4>&1 |
-        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 }
 
 # --- Schritt 1: Domain Controller hochstufen -------------------------------
@@ -96,8 +94,7 @@ function Step-Promote {
 
     # AD DS und DNS Rollen installieren
     Write-Log "Installiere Windows-Features AD-Domain-Services und DNS..."
-    Install-WindowsFeature -Name AD-Domain-Services, DNS -IncludeManagementTools -Verbose 4>&1 |
-        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    Install-WindowsFeature -Name AD-Domain-Services, DNS -IncludeManagementTools
 
     # Pruefen, ob bereits DC ist
     $isDC = (Get-CimInstance Win32_ComputerSystem).DomainRole -ge 4
@@ -114,13 +111,37 @@ function Step-Promote {
             -NoRebootOnCompletion `
             -Force `
             -ErrorAction Stop `
-            -Verbose 4>&1 |
-            ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+           
         Write-Log "Neue Gesamtstruktur erstellt."
     }
 
     Save-Progress -Step "step1finish"
-    Invoke-Reboot -NextStepName "Promotion abschliessen & Musterdaten"
+    Invoke-Reboot -NextStepName "Haertung als Domain Controller"
+}
+
+# --- Schritt 1b: Haerten als Domain Controller (OSConfig) ----------------
+# Nach der Promotion wird die DC-spezifische Security Baseline angewendet.
+function Step-HardenDC {
+    Write-Log "Schritt 1b: Haerten als Domain Controller ueber OSConfig (Windows Server 2025)."
+
+    if (-not (Get-Module -ListAvailable -Name Microsoft.OSConfig)) {
+        Write-Log "ABBRUCH: Modul 'Microsoft.OSConfig' ist nicht installiert. Es muss vor der Skriptausfuehrung auf dem Server installiert sein."
+        throw "Voraussetzung nicht erfuellt: Microsoft.OSConfig Modul fehlt. Installation vorab erforderlich."
+    }
+    Write-Log "OSConfig-Modul gefunden. Importiere..."
+    Import-Module Microsoft.OSConfig -ErrorAction Stop
+
+    try {
+        Write-Log "Wende OSConfig DC-Security-Baseline an (Scenario SecurityBaseline/WindowsServer/2025/DomainController)..."
+        Set-OSConfigDesiredConfiguration -Scenario SecurityBaseline/WindowsServer/2025/DomainController -Default -ErrorAction Stop
+        Write-Log "OSConfig DC-Security-Baseline erfolgreich angewendet."
+    } catch {
+        Write-Log "OSConfig-Baseline konnte nicht angewendet werden: $_"
+        throw $_
+    }
+
+    Save-Progress -Step "step1hardenfinish"
+    Invoke-Reboot -NextStepName "Musterdaten einspielen"
 }
 
 # --- Schritt 2: Domaene mit Musterdaten befuellen --------------------------
@@ -130,11 +151,9 @@ function Step-Populate {
     # AD-Module sicherstellen
     if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
         Write-Log "ActiveDirectory Modul fehlt - installiere RSAT."
-        Install-WindowsFeature -Name RSAT-AD-PowerShell -ErrorAction SilentlyContinue -Verbose 4>&1 |
-            ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+        Install-WindowsFeature -Name RSAT-AD-PowerShell -ErrorAction SilentlyContinue
     }
-    Import-Module ActiveDirectory -ErrorAction Stop -Verbose 4>&1 |
-        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    Import-Module ActiveDirectory -ErrorAction Stop
 
     # Warte, bis der DC nach dem Reboot voll verfuegbar ist
     $retries = 0
@@ -149,8 +168,7 @@ function Step-Populate {
 
     # UPN-Suffix setzen
     try {
-        Set-ADForest -Identity $NetBiosName -UPNSuffixes @{ Replace = $DomainName } -Server $adServer -ErrorAction SilentlyContinue -Verbose 4>&1 |
-            ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+        Set-ADForest -Identity $NetBiosName -UPNSuffixes @{ Replace = $DomainName } -Server $adServer -ErrorAction SilentlyContinue
     } catch { Write-Log "UPN-Suffix nicht gesetzt: $_" }
 
     # OUs anlegen
@@ -167,8 +185,7 @@ function Step-Populate {
     foreach ($ou in $ouList) {
         try {
             if (-not (Get-ADOrganizationalUnit -Filter "Name -eq '$($ou.Name)'" -SearchBase $ou.Path -Server $adServer -ErrorAction SilentlyContinue)) {
-                New-ADOrganizationalUnit -Name $ou.Name -Path $ou.Path -Server $adServer -ErrorAction Stop -Verbose 4>&1 |
-                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+                New-ADOrganizationalUnit -Name $ou.Name -Path $ou.Path -Server $adServer -ErrorAction Stop
                 Write-Log "OU angelegt: $($ou.Name) ($($ou.Path))"
             }
         } catch { Write-Log "OU '$($ou.Name)' nicht angelegt: $_" }
@@ -186,8 +203,7 @@ function Step-Populate {
     foreach ($g in $groups) {
         try {
             if (-not (Get-ADGroup -Identity $g.Name -Server $adServer -ErrorAction SilentlyContinue)) {
-                New-ADGroup -Name $g.Name -GroupCategory Security -GroupScope Global -Description $g.Desc -Path $g.Path -Server $adServer -ErrorAction Stop -Verbose 4>&1 |
-                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+                New-ADGroup -Name $g.Name -GroupCategory Security -GroupScope Global -Description $g.Desc -Path $g.Path -Server $adServer -ErrorAction Stop
                 Write-Log "Gruppe angelegt: $($g.Name)"
             }
         } catch { Write-Log "Gruppe '$($g.Name)' nicht angelegt: $_" }
@@ -218,8 +234,7 @@ function Step-Populate {
                     -Department $dept `
                     -Server $adServer `
                     -ErrorAction Stop `
-                    -Verbose 4>&1 |
-                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+                   
                 $grp = switch ($dept) {
                     "IT"          { "GG_IT_Admin" }
                     "Helpdesk"    { "GG_Helpdesk" }
@@ -227,10 +242,8 @@ function Step-Populate {
                     "Entwicklung" { "GG_Entwicklung" }
                     default       { "GG_Mitarbeiter" }
                 }
-                Add-ADGroupMember -Identity $grp -Members $uname -Server $adServer -ErrorAction SilentlyContinue -Verbose 4>&1 |
-                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
-                Add-ADGroupMember -Identity "GG_Mitarbeiter" -Members $uname -Server $adServer -ErrorAction SilentlyContinue -Verbose 4>&1 |
-                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+                Add-ADGroupMember -Identity $grp -Members $uname -Server $adServer -ErrorAction SilentlyContinue
+                Add-ADGroupMember -Identity "GG_Mitarbeiter" -Members $uname -Server $adServer -ErrorAction SilentlyContinue
                 Write-Log "Benutzer angelegt: $uname ($dept -> $grp)"
             }
         } catch { Write-Log "Benutzer '$uname' nicht angelegt: $_" }
@@ -251,8 +264,7 @@ function Step-Populate {
                     -Enabled $true `
                     -Description "Service-Konto (Muster)" `
                     -Server $adServer `
-                    -Verbose 4>&1 |
-                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+                   
                 Write-Log "Service-Konto angelegt: $svc"
             }
         } catch { Write-Log "Service-Konto '$svc' nicht angelegt: $_" }
@@ -264,8 +276,7 @@ function Step-Populate {
         $cname = "CL-WS{0:D3}" -f $i
         try {
             if (-not (Get-ADComputer -Identity $cname -Server $adServer -ErrorAction SilentlyContinue)) {
-                New-ADComputer -Name $cname -Path $clientOU -Description "Muster-Client $i" -Server $adServer -ErrorAction Stop -Verbose 4>&1 |
-                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+                New-ADComputer -Name $cname -Path $clientOU -Description "Muster-Client $i" -Server $adServer -ErrorAction Stop
                 Write-Log "Computerkonto angelegt: $cname"
             }
         } catch { Write-Log "Computerkonto '$cname' nicht angelegt: $_" }
@@ -277,8 +288,7 @@ function Step-Populate {
         $cname = "SRV-APP{0:D2}" -f $i
         try {
             if (-not (Get-ADComputer -Identity $cname -Server $adServer -ErrorAction SilentlyContinue)) {
-                New-ADComputer -Name $cname -Path $serverOU -Description "Muster-Server $i" -Server $adServer -ErrorAction Stop -Verbose 4>&1 |
-                    ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+                New-ADComputer -Name $cname -Path $serverOU -Description "Muster-Server $i" -Server $adServer -ErrorAction Stop
                 Write-Log "Server-Konto angelegt: $cname"
             }
         } catch { Write-Log "Server-Konto '$cname' nicht angelegt: $_" }
@@ -288,11 +298,9 @@ function Step-Populate {
     try {
         $gpoName = "Domaenen-Passwortrichtlinie"
         if (-not (Get-GPO -Name $gpoName -ErrorAction SilentlyContinue)) {
-            New-GPO -Name $gpoName -Verbose 4>&1 | ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
-            Set-GPRegistryValue -Name $gpoName -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\PasswordPolicy" -ValueName "MinimumPasswordLength" -Type DWord -Value 14 -ErrorAction SilentlyContinue -Verbose 4>&1 |
-                ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
-            New-GPLink -Name $gpoName -Target $baseDN -LinkEnabled Yes -Verbose 4>&1 |
-                ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+            New-GPO -Name $gpoName
+            Set-GPRegistryValue -Name $gpoName -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\PasswordPolicy" -ValueName "MinimumPasswordLength" -Type DWord -Value 14 -ErrorAction SilentlyContinue
+            New-GPLink -Name $gpoName -Target $baseDN -LinkEnabled Yes
             Write-Log "GPO '$gpoName' erstellt und verlinkt."
         }
     } catch { Write-Log "GPO nicht erstellt: $_" }
@@ -306,8 +314,7 @@ function Step-Populate {
 function Step-Cleanup {
     Write-Log "Schritt 3: Aufraeumen - Domaene ist fertig."
     Remove-ScheduledTask
-    Remove-Item -Path $progressFile -Force -ErrorAction SilentlyContinue -Verbose 4>&1 |
-        ForEach-Object { if ($_ -is [string] -and $_ -match 'VERBOSE') { Write-Log "VERBOSE | $_" } } | Out-Null
+    Remove-Item -Path $progressFile -Force -ErrorAction SilentlyContinue
     # Letzte GPO-Verifikation nach Abschluss
     try {
         gpupdate /force 2>$null | Out-Null
@@ -321,9 +328,10 @@ try {
     $current = if (Test-Path $progressFile) { (Get-Content $progressFile -Raw).Trim() } else { "" }
 
     switch ($current) {
-        ""            { Create-ScheduledTask; Step-Promote }
-        "step1finish" { Step-Populate }
-        "step2finish" { Step-Cleanup }
+        ""                { Create-ScheduledTask; Step-Promote }
+        "step1finish"     { Step-HardenDC }
+        "step1hardenfinish" { Step-Populate }
+        "step2finish"     { Step-Cleanup }
         default {
             Write-Log "Unbekannter Fortschrittsstatus '$current'. Breche ab."
             Remove-ScheduledTask
