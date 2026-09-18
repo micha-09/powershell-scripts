@@ -29,9 +29,6 @@
 .PARAMETER DsrmPassword
     Kennwort fuer den Verzeichnisdienst-Wiederherstellungsmodus (DSRM).
 
-.PARAMETER DemoUserCount
-    Anzahl der Musterbenutzer, die in Schritt 2 angelegt werden.
-
 .EXAMPLE
     powershell.exe -ExecutionPolicy Bypass -File .\Create_AD.ps1 -DomainName "corp.example.com" -NetBiosName "CORP" -DsrmPassword "P@ssw0rd!2025"
 #>
@@ -40,8 +37,7 @@
 param (
     [string]$DomainName      = "corp.example.com",
     [string]$NetBiosName      = "CORP",
-    [string]$DsrmPassword     = "Fenster2020!",
-    [int]   $DemoUserCount    = 25
+    [string]$DsrmPassword     = "Fenster2020!"
 )
 
 $ErrorActionPreference = "Stop"
@@ -76,7 +72,7 @@ function Invoke-Reboot {
 
 function Create-ScheduledTask {
     Write-Log "Erzeuge geplante Aufgabe '$taskName' fuer den Autostart nach Neustart."
-    $action    = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -DomainName `"$DomainName`" -NetBiosName `"$NetBiosName`" -DsrmPassword `"$DsrmPassword`" -DemoUserCount $DemoUserCount"
+    $action    = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -DomainName `"$DomainName`" -NetBiosName `"$NetBiosName`" -DsrmPassword `"$DsrmPassword`""
     $trigger   = New-ScheduledTaskTrigger -AtStartup
     $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
     $settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
