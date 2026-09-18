@@ -92,6 +92,17 @@ function Remove-ScheduledTask {
 function Step-Promote {
     Write-Log "Schritt 1: Server zum Domain Controller hochstufen."
 
+    # RemoteRegistry temporaer aktivieren (benoetigt fuer AD-Promotion)
+    Write-Log "Aktiviere RemoteRegistry-Dienst temporaer fuer AD-Promotion..."
+    try {
+        $svc = Get-Service -Name "RemoteRegistry" -ErrorAction SilentlyContinue
+        if ($svc) {
+            Set-Service -Name "RemoteRegistry" -StartupType Automatic -ErrorAction SilentlyContinue
+            Start-Service -Name "RemoteRegistry" -ErrorAction SilentlyContinue
+            Write-Log "RemoteRegistry-Dienst aktiviert und gestartet."
+        }
+    } catch { Write-Log "RemoteRegistry konnte nicht aktiviert werden: $_" }
+
     # AD DS und DNS Rollen installieren
     Write-Log "Installiere Windows-Features AD-Domain-Services und DNS..."
     Install-WindowsFeature -Name AD-Domain-Services, DNS -IncludeManagementTools
@@ -114,6 +125,17 @@ function Step-Promote {
            
         Write-Log "Neue Gesamtstruktur erstellt."
     }
+
+    # RemoteRegistry wieder deaktivieren nach erfolgreicher Promotion
+    Write-Log "Deaktiviere RemoteRegistry-Dienst wieder nach AD-Promotion..."
+    try {
+        $svc = Get-Service -Name "RemoteRegistry" -ErrorAction SilentlyContinue
+        if ($svc) {
+            Stop-Service -Name "RemoteRegistry" -Force -ErrorAction SilentlyContinue
+            Set-Service -Name "RemoteRegistry" -StartupType Disabled -ErrorAction SilentlyContinue
+            Write-Log "RemoteRegistry-Dienst deaktiviert."
+        }
+    } catch { Write-Log "RemoteRegistry konnte nicht deaktiviert werden: $_" }
 
     Save-Progress -Step "step1finish"
     Invoke-Reboot -NextStepName "Haertung als Domain Controller"

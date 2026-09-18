@@ -231,15 +231,20 @@ function Step-Optimize {
     # nachtraeglich beim naechsten Anmelden aktivieren (einmaliger Task, der sich selbst loescht).
     Register-LocalizationUserTask
 
-    # Ueberfluessige Dienste deaktivieren (Beispiele, die auf einem DC nicht benoetigt werden)
+    # Ueberfluessige Dienste deaktivieren (Sicherheit & Performance Optimierung)
+    # Hinweis: RemoteRegistry wird hier deaktiviert, muss aber fuer AD-Promotion im Create_AD.ps1
+    # temporaer wieder aktiviert werden (vor dem promote) und nach dem Setup wieder deaktiviert werden.
     $servicesToDisable = @(
+        "Spooler",
         "DiagTrack",
         "dmwappushservice",
-        "SysMain",
-        "WSearch",
-        "PrintSpooler",
         "RemoteRegistry",
-        "lfsvc"
+        "WSearch",
+        "SysMain",
+        "lfsvc",
+        "lmhosts",
+        "XboxGipSvc",
+        "XblAuthManager"
     )
     foreach ($svc in $servicesToDisable) {
         try {
