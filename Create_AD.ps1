@@ -40,7 +40,7 @@
 param (
     [string]$DomainName      = "corp.example.com",
     [string]$NetBiosName      = "CORP",
-    [string]$DsrmPassword     = "Fenster2020",
+    [string]$DsrmPassword     = "Fenster2020!",
     [int]   $DemoUserCount    = 25
 )
 
