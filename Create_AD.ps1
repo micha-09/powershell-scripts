@@ -196,6 +196,14 @@ function Clear-PendingReboot {
 function Step-Promote {
     Write-Log "Schritt 1: Server zum Domain Controller hochstufen."
 
+    # Pruefe zu beginn ob neustarts ausstehen, falls ja neustarten
+    if (Test-PendingReboot) {
+        Write-Log "Ausstehender Neustart erkannt. Fuehre Neustart durch..."
+        Save-Progress -Step "step1reboot_check"
+        Invoke-Reboot -NextStepName "AD-Promotion (Neustart-Pruefung)"
+        return
+    }
+
     # RemoteRegistry temporaer aktivieren (benoetigt fuer AD-Promotion)
     Write-Log "Aktiviere RemoteRegistry-Dienst temporaer fuer AD-Promotion..."
     try {
@@ -207,34 +215,17 @@ function Step-Promote {
         }
     } catch { Write-Log "RemoteRegistry konnte nicht aktiviert werden: $_" }
 
-    # 1) Pruefe ob neustarts ausstehen
+    # Pruefe nach diesem neustart nochmal ob Neustarts ausstehen, falls ja mache das clearing der pending reboots
     if (Test-PendingReboot) {
-        Write-Log "Ausstehender Neustart erkannt."
-        
-        # 2) Falls ja starte den rechner neu
-        Write-Log "Fuehre Neustart durch..."
-        Save-Progress -Step "step1reboot"
-        Invoke-Reboot -NextStepName "AD-Promotion (Neustart erforderlich)"
-        return
+        Write-Log "Ausstehender Neustart immer noch erkannt. Bereinige Flags..."
+        Clear-PendingReboot
+        Start-Sleep -Seconds 5
     }
 
+    # Anschliessend mache mit der installieren der ad rolle weiter
     # AD DS und DNS Rollen installieren
     Write-Log "Installiere Windows-Features AD-Domain-Services und DNS..."
-    try {
-        Install-WindowsFeature -Name AD-Domain-Services, DNS -IncludeManagementTools -ErrorAction Stop
-    } catch {
-        Write-Log "Fehler bei der Feature-Installation: $_"
-        
-        # Pruefe, ob der Fehler auf einen ausstehenden Neustart zurueckzufuehren ist
-        if ($_.Exception.Message -like "*restart*" -or $_.Exception.Message -like "*reboot*" -or Test-PendingReboot) {
-            Write-Log "Feature-Installation erfordert Neustart. Fuehre Neustart durch..."
-            Save-Progress -Step "step1reboot"
-            Invoke-Reboot -NextStepName "AD-Promotion (Neustart erforderlich)"
-            return
-        } else {
-            throw $_
-        }
-    }
+    Install-WindowsFeature -Name AD-Domain-Services, DNS -IncludeManagementTools -ErrorAction Stop
 
     # Pruefen, ob bereits DC ist
     $isDC = (Get-CimInstance Win32_ComputerSystem).DomainRole -ge 4
@@ -472,25 +463,19 @@ function Step-Cleanup {
     Write-Log "Skript abgeschlossen. Domain Controller $NetBiosName ($DomainName) ist einsatzbereit."
 }
 
-# --- Schritt 1c: AD-Promotion (Neustart erforderlich) ---------------------
-# Falls ein Neustart wegen ausstehender Features/Updates erforderlich ist
-function Step-PromoteReboot {
-    Write-Log "Schritt 1c: Neustart wegen ausstehender Aenderungen erforderlich..."
+# --- Schritt 1b: AD-Promotion (Neustart-Pruefung) -------------------------
+# Nach Neustart: Pruefe nochmal ob Neustarts ausstehen, falls ja clearing durchfuehren
+function Step-PromoteCheck {
+    Write-Log "Schritt 1b: Pruefe nach Neustart auf ausstehende Aenderungen..."
     
-    # 3) Pruefe nochmal ob neustarts ausstehen
+    # Pruefe nach diesem neustart nochmal ob Neustarts ausstehen, falls ja mache das clearing der pending reboots
     if (Test-PendingReboot) {
-        Write-Log "Ausstehender Neustart immer noch erkannt. Fuehre Neustart durch..."
-        Save-Progress -Step "step1reboot"
-        Invoke-Reboot -NextStepName "AD-Promotion (Neustart erforderlich)"
-        return
+        Write-Log "Ausstehender Neustart immer noch erkannt. Bereinige Flags..."
+        Clear-PendingReboot
+        Start-Sleep -Seconds 5
     }
     
-    # 4) Falls ja mache das Clearing der Flags
-    Write-Log "Kein ausstehender Neustart mehr erkannt. Bereinige Flags..."
-    Clear-PendingReboot
-    Start-Sleep -Seconds 5
-    
-    # 5) Fahre vor mit der installation der rolle
+    # Anschliessend mache mit der installieren der ad rolle weiter
     Write-Log "Fahre mit der Rolleninstallation fort..."
     Step-Promote
 }
@@ -501,7 +486,7 @@ try {
 
     switch ($current) {
         ""                     { Create-ScheduledTask; Step-Promote }
-        "step1reboot"          { Step-PromoteReboot }
+        "step1reboot_check"    { Step-PromoteCheck }
         "step1finish"          { Step-HardenDC }
         "step1hardenfinish"    { Step-Populate }
         "step2finish"          { Step-Cleanup }
