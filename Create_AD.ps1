@@ -207,9 +207,12 @@ function Step-Promote {
         }
     } catch { Write-Log "RemoteRegistry konnte nicht aktiviert werden: $_" }
 
-    # Pruefe, ob ein Neustart aussteht und behandle dies
+    # 1) Pruefe ob neustarts ausstehen
     if (Test-PendingReboot) {
-        Write-Log "Ausstehender Neustart erkannt. Fuehre Neustart durch..."
+        Write-Log "Ausstehender Neustart erkannt."
+        
+        # 2) Falls ja starte den rechner neu
+        Write-Log "Fuehre Neustart durch..."
         Save-Progress -Step "step1reboot"
         Invoke-Reboot -NextStepName "AD-Promotion (Neustart erforderlich)"
         return
@@ -474,7 +477,7 @@ function Step-Cleanup {
 function Step-PromoteReboot {
     Write-Log "Schritt 1c: Neustart wegen ausstehender Aenderungen erforderlich..."
     
-    # Pruefe erneut, ob ein Neustart aussteht
+    # 3) Pruefe nochmal ob neustarts ausstehen
     if (Test-PendingReboot) {
         Write-Log "Ausstehender Neustart immer noch erkannt. Fuehre Neustart durch..."
         Save-Progress -Step "step1reboot"
@@ -482,12 +485,13 @@ function Step-PromoteReboot {
         return
     }
     
-    # Falls kein Neustart mehr aussteht, bereinige unnoetige Flags und fahre fort
-    Write-Log "Kein ausstehender Neustart mehr erkannt. Bereinige unnoetige Flags..."
+    # 4) Falls ja mache das Clearing der Flags
+    Write-Log "Kein ausstehender Neustart mehr erkannt. Bereinige Flags..."
     Clear-PendingReboot
     Start-Sleep -Seconds 5
     
-    Write-Log "Fahre mit AD-Promotion fort..."
+    # 5) Fahre vor mit der installation der rolle
+    Write-Log "Fahre mit der Rolleninstallation fort..."
     Step-Promote
 }
 
