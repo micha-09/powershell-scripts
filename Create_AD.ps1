@@ -123,6 +123,19 @@ function Set-RandomAdminPassword {
     }
 }
 
+# Stellt sicher, dass der AD Web Services Dienst (ADWS) laeuft.
+# Direkt nach einem Reboot ist ADWS evtl. noch nicht bereit, was die automatische
+# DC-Suche der AD-Cmdlets mit 'Unable to find a default server' fehlschlagen laesst.
+function Wait-AdwsService {
+    try {
+        $adws = Get-Service -Name ADWS -ErrorAction SilentlyContinue
+        if ($adws -and $adws.Status -ne "Running") {
+            Start-Service -Name ADWS -ErrorAction SilentlyContinue
+            $adws.WaitForStatus("Running", (New-TimeSpan -Seconds 120))
+        }
+    } catch { Write-Log "ADWS-Dienst konnte nicht gestartet werden: $_" }
+}
+
 # Setzt das finale Admin-Kennwort am Ende des Skripts (Domain Administrator).
 # Erst nach diesem Schritt ist eine Anmeldung am DC wieder moeglich.
 function Set-FinalAdminPassword {
@@ -131,11 +144,13 @@ function Set-FinalAdminPassword {
             Install-WindowsFeature -Name RSAT-AD-PowerShell -ErrorAction SilentlyContinue
         }
         Import-Module ActiveDirectory -ErrorAction Stop
-        $domainSid = (Get-ADDomain).DomainSID.Value
-        $admin = Get-ADUser -Identity "$domainSid-500" -ErrorAction SilentlyContinue
+        Wait-AdwsService
+        $adServer = $env:COMPUTERNAME
+        $domainSid = (Get-ADDomain -Server $adServer).DomainSID.Value
+        $admin = Get-ADUser -Filter "SID -eq '$domainSid-500'" -Server $adServer -ErrorAction SilentlyContinue
         if ($admin) {
             $securePwd = ConvertTo-SecureString $AdminPassword -AsPlainText -Force
-            Set-ADAccountPassword -Identity $admin.SamAccountName -NewPassword $securePwd -Reset -ErrorAction Stop
+            Set-ADAccountPassword -Identity $admin.SamAccountName -NewPassword $securePwd -Reset -Server $adServer -ErrorAction Stop
             Write-Log "Domain Administrator Kennwort auf gewuenschten Wert gesetzt (Login wieder moeglich)."
         }
     } catch { Write-Log "Finales Admin-Kennwort konnte nicht gesetzt werden: $_" }
