@@ -79,17 +79,20 @@ Das Administrator-Konto (SID-500) wird **zu Beginn** mit einem zufaelligen Kennw
     Domain Root (DC=dev,DC=lab)
     ├── Tier0
     │   ├── T0-Admins (Benutzer)
-    │   └── T0-Servers (DCs, PKI)
+    │   ├── T0-Servers (DCs, PKI)
+    │   ├── T0-Service Accounts
+    │   └── T0-Gruppen
     ├── Tier1
     │   ├── T1-Admins (Server-Admins, Helpdesk Level 2)
-    │   └── T1-Servers (SQL, Exchange, etc.)
-    ├── Tier2
-    │   ├── T2-Users (Normale Mitarbeiter)
-    │   ├── T2-Admins (Helpdesk Level 1)
-    │   └── T2-Clients (Windows Laptops/PCs)
-    ├── Gruppen
-    ├── ServiceAccounts
-    └── Benutzer
+    │   ├── T1-Servers (SQL, Exchange, etc.)
+    │   ├── T1-Service Accounts
+    │   └── T1-Gruppen
+    └── Tier2
+        ├── T2-Users (Normale Mitarbeiter)
+        ├── T2-Admins (Helpdesk Level 1)
+        ├── T2-Clients (Windows Laptops/PCs)
+        ├── T2-Service Accounts
+        └── T2-Gruppen
     ```
   - **Sicherheitsgruppen erstellen:**
     - T0-Admins (Tier 0 Administratoren)
@@ -122,12 +125,12 @@ Das Administrator-Konto (SID-500) wird **zu Beginn** mit einem zufaelligen Kennw
 **Zweck:** Befuellt die Domaene mit Musterbenutzern, Gruppen und Computerkonten.
 
 #### Funktionen:
-- **Sicherheitsgruppen erstellen:**
+- **Sicherheitsgruppen erstellen** (in T2-Gruppen):
   - GG_IT_Admin, GG_Helpdesk, GG_Mitarbeiter, GG_Finanzen, GG_Entwicklung, GG_ServerAdmin
-- **Musterbenutzer anlegen:**
+- **Musterbenutzer anlegen** (in T2-Users):
   - 25 Demo-Benutzer (Demo.User01 bis Demo.User25)
   - Zuordnung zu Abteilungen (IT, Helpdesk, Finanzen, Entwicklung, Vertrieb, HR)
-- **Service-Accounts erstellen:**
+- **Service-Accounts erstellen** (in T2-Service Accounts):
   - svc_backup, svc_monitoring, svc_join, svc_print
 - **Computerkonten anlegen:**
   - 10 Client-Computer (CL-WS001 bis CL-WS010) in T2-Clients OU
@@ -232,7 +235,7 @@ Die folgende Liste von Diensten wird in `VM_Basic.ps1` deaktiviert, um Sicherhei
 ### [Latest](https://github.com/micha-09/powershell-scripts/commit/main)
 - **Create_AD.ps1:**
   - **Neue Sicherheitsmassnahme:** Admin-Konto (SID-500) wird waehrend des Setups mit zufaelligem Kennwort gesperrt, erst am Ende wird das gewuenschte Kennwort gesetzt (`-AdminPassword` Parameter)
-  - **OU-Struktur vereinfacht:** Root-OU 'Unternehmen' entfernt, alle OUs haengen direkt am Domain-Root
+  - **OU-Struktur angepasst:** Jeder Tier erhaelt eigene 'Service Accounts'- und 'Gruppen'-OUs (T0/T1/T2); globale OUs (Gruppen, ServiceAccounts, Benutzer) entfernt; Tiering-Gruppen liegen in den jeweiligen T*-Gruppen-OUs
   - **Splatting-Refactoring:** `Install-ADDSForest` nutzt jetzt Parameter-Hashtables statt Backtick-Notation (robuster, lesbarer)
   - Korrigierte Neustart-Logik: Maximal 1 Neustart vor der Rolleninstallation
   - `Step-PromoteCheck` fuehrt direkt die Rolleninstallation aus (keine Endlosschleife mehr)

@@ -366,19 +366,22 @@ function Step-Populate {
     # Tiering-Struktur OUs anlegen
     Write-Log "Erstelle Tiering-Struktur OUs..."
     $tieringOUs = @(
-        @{ Name = "Tier0";             Path = $baseDN },
-        @{ Name = "T0-Admins";         Path = "OU=Tier0,$baseDN" },
-        @{ Name = "T0-Servers";        Path = "OU=Tier0,$baseDN" },
-        @{ Name = "Tier1";             Path = $baseDN },
-        @{ Name = "T1-Admins";         Path = "OU=Tier1,$baseDN" },
-        @{ Name = "T1-Servers";        Path = "OU=Tier1,$baseDN" },
-        @{ Name = "Tier2";             Path = $baseDN },
-        @{ Name = "T2-Users";          Path = "OU=Tier2,$baseDN" },
-        @{ Name = "T2-Admins";         Path = "OU=Tier2,$baseDN" },
-        @{ Name = "T2-Clients";        Path = "OU=Tier2,$baseDN" },
-        @{ Name = "Gruppen";           Path = $baseDN },
-        @{ Name = "ServiceAccounts";  Path = $baseDN },
-        @{ Name = "Benutzer";          Path = $baseDN }
+        @{ Name = "Tier0";                 Path = $baseDN },
+        @{ Name = "T0-Admins";             Path = "OU=Tier0,$baseDN" },
+        @{ Name = "T0-Servers";            Path = "OU=Tier0,$baseDN" },
+        @{ Name = "T0-Service Accounts";  Path = "OU=Tier0,$baseDN" },
+        @{ Name = "T0-Gruppen";            Path = "OU=Tier0,$baseDN" },
+        @{ Name = "Tier1";                 Path = $baseDN },
+        @{ Name = "T1-Admins";             Path = "OU=Tier1,$baseDN" },
+        @{ Name = "T1-Servers";            Path = "OU=Tier1,$baseDN" },
+        @{ Name = "T1-Service Accounts";  Path = "OU=Tier1,$baseDN" },
+        @{ Name = "T1-Gruppen";            Path = "OU=Tier1,$baseDN" },
+        @{ Name = "Tier2";                 Path = $baseDN },
+        @{ Name = "T2-Users";              Path = "OU=Tier2,$baseDN" },
+        @{ Name = "T2-Admins";             Path = "OU=Tier2,$baseDN" },
+        @{ Name = "T2-Clients";            Path = "OU=Tier2,$baseDN" },
+        @{ Name = "T2-Service Accounts";  Path = "OU=Tier2,$baseDN" },
+        @{ Name = "T2-Gruppen";            Path = "OU=Tier2,$baseDN" }
     )
     foreach ($ou in $tieringOUs) {
         try {
@@ -392,10 +395,10 @@ function Step-Populate {
     # Sicherheitsgruppen fuer Tiering anlegen
     Write-Log "Erstelle Sicherheitsgruppen fuer Tiering..."
     $tieringGroups = @(
-        @{ Name = "T0-Admins";         Desc = "Tier 0 Administratoren (DC, PKI)";          Path = "OU=Gruppen,$baseDN" },
-        @{ Name = "T1-Admins";         Desc = "Tier 1 Administratoren (SQL, Exchange)";    Path = "OU=Gruppen,$baseDN" },
-        @{ Name = "T2-Admins";         Desc = "Tier 2 Administratoren (Helpdesk Level 1)";  Path = "OU=Gruppen,$baseDN" },
-        @{ Name = "T2-Users";          Desc = "Tier 2 Benutzer (Normale Mitarbeiter)";      Path = "OU=Gruppen,$baseDN" }
+        @{ Name = "T0-Admins";         Desc = "Tier 0 Administratoren (DC, PKI)";          Path = "OU=T0-Gruppen,OU=Tier0,$baseDN" },
+        @{ Name = "T1-Admins";         Desc = "Tier 1 Administratoren (SQL, Exchange)";    Path = "OU=T1-Gruppen,OU=Tier1,$baseDN" },
+        @{ Name = "T2-Admins";         Desc = "Tier 2 Administratoren (Helpdesk Level 1)";  Path = "OU=T2-Gruppen,OU=Tier2,$baseDN" },
+        @{ Name = "T2-Users";          Desc = "Tier 2 Benutzer (Normale Mitarbeiter)";      Path = "OU=T2-Gruppen,OU=Tier2,$baseDN" }
     )
     foreach ($g in $tieringGroups) {
         try {

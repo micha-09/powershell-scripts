@@ -8,9 +8,9 @@
     bereits mit Create_AD.ps1 erstellt wurde und die Grund-OU-Struktur existiert.
 
     Das Skript erstellt:
-      - Sicherheitsgruppen (IT_Admin, Helpdesk, Mitarbeiter, etc.) in OU=Gruppen
-      - Musterbenutzer (25 Standardbenutzer) in OU=Benutzer
-      - Service-Accounts in OU=ServiceAccounts
+      - Sicherheitsgruppen (IT_Admin, Helpdesk, Mitarbeiter, etc.) in OU=T2-Gruppen
+      - Musterbenutzer (25 Standardbenutzer) in OU=T2-Users
+      - Service-Accounts in OU=T2-Service Accounts
       - Muster-Computerkonten (Clients in T2-Clients, Server in T1-Servers)
 
     Voraussetzungen:
@@ -77,15 +77,22 @@ try {
     # Benoetigte OUs anlegen, falls sie nicht existieren
     Write-Log "Pruefe und erstelle benoetigte OUs..."
     $requiredOUs = @(
-        @{ Name = "Gruppen";           Path = $baseDN },
-        @{ Name = "Benutzer";          Path = $baseDN },
-        @{ Name = "ServiceAccounts";  Path = $baseDN },
-        @{ Name = "Tier0";             Path = $baseDN },
-        @{ Name = "T0-Servers";        Path = "OU=Tier0,$baseDN" },
-        @{ Name = "Tier1";             Path = $baseDN },
-        @{ Name = "T1-Servers";        Path = "OU=Tier1,$baseDN" },
-        @{ Name = "Tier2";             Path = $baseDN },
-        @{ Name = "T2-Clients";        Path = "OU=Tier2,$baseDN" }
+        @{ Name = "Tier0";                 Path = $baseDN },
+        @{ Name = "T0-Admins";             Path = "OU=Tier0,$baseDN" },
+        @{ Name = "T0-Servers";            Path = "OU=Tier0,$baseDN" },
+        @{ Name = "T0-Service Accounts";  Path = "OU=Tier0,$baseDN" },
+        @{ Name = "T0-Gruppen";            Path = "OU=Tier0,$baseDN" },
+        @{ Name = "Tier1";                 Path = $baseDN },
+        @{ Name = "T1-Admins";             Path = "OU=Tier1,$baseDN" },
+        @{ Name = "T1-Servers";            Path = "OU=Tier1,$baseDN" },
+        @{ Name = "T1-Service Accounts";  Path = "OU=Tier1,$baseDN" },
+        @{ Name = "T1-Gruppen";            Path = "OU=Tier1,$baseDN" },
+        @{ Name = "Tier2";                 Path = $baseDN },
+        @{ Name = "T2-Users";              Path = "OU=Tier2,$baseDN" },
+        @{ Name = "T2-Admins";             Path = "OU=Tier2,$baseDN" },
+        @{ Name = "T2-Clients";            Path = "OU=Tier2,$baseDN" },
+        @{ Name = "T2-Service Accounts";  Path = "OU=Tier2,$baseDN" },
+        @{ Name = "T2-Gruppen";            Path = "OU=Tier2,$baseDN" }
     )
     foreach ($ou in $requiredOUs) {
         try {
@@ -96,15 +103,16 @@ try {
         } catch { Write-Log "OU '$($ou.Name)' nicht angelegt: $_" }
     }
 
-    # Sicherheitsgruppen anlegen
+    # Sicherheitsgruppen anlegen (Tier 2 - Mitarbeiter-/Abteilungsgruppen)
     Write-Log "Erstelle Sicherheitsgruppen..."
+    $t2GruppenOU = "OU=T2-Gruppen,OU=Tier2,$baseDN"
     $groups = @(
-        @{ Name = "GG_IT_Admin";       Desc = "IT Administratoren";       Path = "OU=Gruppen,$baseDN" },
-        @{ Name = "GG_Helpdesk";       Desc = "Helpdesk-Mitarbeiter";     Path = "OU=Gruppen,$baseDN" },
-        @{ Name = "GG_Mitarbeiter";    Desc = "Alle Mitarbeiter";         Path = "OU=Gruppen,$baseDN" },
-        @{ Name = "GG_Finanzen";       Desc = "Finanzabteilung";          Path = "OU=Gruppen,$baseDN" },
-        @{ Name = "GG_Entwicklung";    Desc = "Entwickler";               Path = "OU=Gruppen,$baseDN" },
-        @{ Name = "GG_ServerAdmin";    Desc = "Server-Administratoren";    Path = "OU=Gruppen,$baseDN" }
+        @{ Name = "GG_IT_Admin";       Desc = "IT Administratoren";       Path = $t2GruppenOU },
+        @{ Name = "GG_Helpdesk";       Desc = "Helpdesk-Mitarbeiter";     Path = $t2GruppenOU },
+        @{ Name = "GG_Mitarbeiter";    Desc = "Alle Mitarbeiter";         Path = $t2GruppenOU },
+        @{ Name = "GG_Finanzen";       Desc = "Finanzabteilung";          Path = $t2GruppenOU },
+        @{ Name = "GG_Entwicklung";    Desc = "Entwickler";               Path = $t2GruppenOU },
+        @{ Name = "GG_ServerAdmin";    Desc = "Server-Administratoren";    Path = $t2GruppenOU }
     )
     foreach ($g in $groups) {
         try {
@@ -119,7 +127,7 @@ try {
     Write-Log "Erstelle Musterbenutzer..."
     $depts = @("IT","Helpdesk","Finanzen","Entwicklung","Vertrieb","HR")
     $securePwd = ConvertTo-SecureString "Fenster2020!" -AsPlainText -Force
-    $userOU = "OU=Benutzer,$baseDN"
+    $userOU = "OU=T2-Users,OU=Tier2,$baseDN"
     for ($i = 1; $i -le $DemoUserCount; $i++) {
         $dept   = $depts[(($i - 1) % $depts.Count)]
         $fn     = "Demo"
@@ -158,7 +166,7 @@ try {
 
     # Service-Accounts (gMSA-geeignete Konten als Muster)
     Write-Log "Erstelle Service-Accounts..."
-    $svcOU = "OU=ServiceAccounts,$baseDN"
+    $svcOU = "OU=T2-Service Accounts,OU=Tier2,$baseDN"
     $svcAccounts = @("svc_backup","svc_monitoring","svc_join","svc_print")
     foreach ($svc in $svcAccounts) {
         try {
