@@ -195,6 +195,20 @@ function Step-Init {
     Write-Log "Schritt 1: Initialisierung."
     New-Item -ItemType Directory -Path "C:\Temp" -Force
     Add-Content -Path $scriptLog -Value "---- Neue Skriptausfuehrung gestartet $(Get-Date) ----"
+
+    # Lokaler Administrator umbenennen und zufaelliges Kennwort setzen (verhindert Anmeldung waehrend Setup)
+    try {
+        $admin = Get-LocalUser | Where-Object { $_.SID -like "S-1-5-21-*-500" }
+        if ($admin) {
+            Rename-LocalUser -Name $admin.Name -NewName $LocalAdminName -ErrorAction SilentlyContinue
+            # Setze zufaelliges Passwort, um Anmeldung waehrend des Setups zu verhindern
+            $randomPwd = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 20 | ForEach-Object { [char]$_ })
+            Set-LocalUser -Name $LocalAdminName -Password (ConvertTo-SecureString $randomPwd -AsPlainText -Force) -ErrorAction SilentlyContinue
+            Enable-LocalUser -Name $LocalAdminName -ErrorAction SilentlyContinue
+            Write-Log "Lokaler Administrator umbenannt und mit zufaelligem Passwort gesichert: $LocalAdminName"
+        }
+    } catch { Write-Log "Lokaler Administrator nicht angepasst: $_" }
+
     Set-StaticIPConfig
     # Ermoeglichen spaeterer RDP-Verwaltung
     Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0 -ErrorAction SilentlyContinue
@@ -286,19 +300,6 @@ function Step-Optimize {
     # Temp bereinigen
     Get-ChildItem "C:\Windows\Temp","$env:TEMP" -ErrorAction SilentlyContinue |
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-
-    # Lokaler Administrator umbenennen und zufaelliges Kennwort setzen (verhindert Anmeldung waehrend Setup)
-    try {
-        $admin = Get-LocalUser | Where-Object { $_.SID -like "S-1-5-21-*-500" }
-        if ($admin) {
-            Rename-LocalUser -Name $admin.Name -NewName $LocalAdminName -ErrorAction SilentlyContinue
-            # Setze zufaelliges Passwort, um Anmeldung waehrend des Setups zu verhindern
-            $randomPwd = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 20 | ForEach-Object { [char]$_ })
-            Set-LocalUser -Name $LocalAdminName -Password (ConvertTo-SecureString $randomPwd -AsPlainText -Force) -ErrorAction SilentlyContinue
-            Enable-LocalUser -Name $LocalAdminName -ErrorAction SilentlyContinue
-            Write-Log "Lokaler Administrator umbenannt und mit zufaelligem Passwort gesichert: $LocalAdminName"
-        }
-    } catch { Write-Log "Lokaler Administrator nicht angepasst: $_" }
 
     Save-Progress -Step "step2finish"
     Invoke-Reboot -NextStepName "Abschluss"

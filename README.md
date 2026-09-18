@@ -11,6 +11,7 @@ Dieses Repository enthaelt PowerShell-Skripte zur Automatisierung der Bereitstel
 
 #### Funktionen:
 - **Schritt 1: Initialisierung**
+  - **Lokalen Administrator umbenennen** und **Zufaelliges Admin-Passwort setzen** (Sicherheitsmassnahme: verhindert Anmeldung waehrend des gesamten Setups)
   - Statische IP-Konfiguration (wird in Azure uebersprungen)
   - RDP-Zugriff ermoeglichen
   - Erstellt eine geplante Aufgabe fuer den automatischen Neustart
@@ -33,8 +34,6 @@ Dieses Repository enthaelt PowerShell-Skripte zur Automatisierung der Bereitstel
   - SMB1 deaktivieren (Sicherheitsrisiko)
   - Windows Defender Ausschluesse fuer AD-Verzeichnisse
   - Temp-Bereinigung
-  - Lokalen Administrator umbenennen
-  - **Sicherheitsmassnahme: Zufaelliges Admin-Passwort setzen** (verhindert Anmeldung waehrend Setup)
 
 - **Schritt 3: Aufraeumen**
   - **Admin-Passwort auf gewuenschten Wert setzen** (letzter Schritt)
