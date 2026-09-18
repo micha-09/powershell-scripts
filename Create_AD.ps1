@@ -88,6 +88,110 @@ function Remove-ScheduledTask {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 }
 
+# Prueft, ob ein Neustart des Servers aussteht (Windows Features, Updates, etc.)
+function Test-PendingReboot {
+    Write-Log "Pruefe, ob ein Neustart aussteht..."
+    
+    # 1. Pruefe Windows Feature-Installation (CBS/Component-Based Servicing)
+    $pendingRebootCBS = $false
+    try {
+        $regPath = "HKLM:\SOFTWARE\Microsoft\ServerManager\ServicingParameters"
+        if (Test-Path $regPath) {
+            $pending = Get-ItemProperty -Path $regPath -Name "PendingReboot" -ErrorAction SilentlyContinue
+            if ($pending -and $pending.PendingReboot -eq 1) {
+                $pendingRebootCBS = $true
+                Write-Log "Ausstehender Neustart erkannt: Windows Features (CBS)."
+            }
+        }
+    } catch { Write-Log "Fehler bei CBS-Reboot-Pruefung: $_" }
+
+    # 2. Pruefe Windows Update / Hotfix (WUA)
+    $pendingRebootWUA = $false
+    try {
+        $regPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"
+        if (Test-Path $regPath) {
+            $pendingRebootWUA = $true
+            Write-Log "Ausstehender Neustart erkannt: Windows Update."
+        }
+    } catch { Write-Log "Fehler bei WUA-Reboot-Pruefung: $_" }
+
+    # 3. Pruefe Component-Based Servicing (CBS) Registry
+    $pendingRebootCBS2 = $false
+    try {
+        $regPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending"
+        if (Test-Path $regPath) {
+            $pendingRebootCBS2 = $true
+            Write-Log "Ausstehender Neustart erkannt: CBS RebootPending."
+        }
+    } catch { Write-Log "Fehler bei CBS-RebootPending-Pruefung: $_" }
+
+    # 4. Pruefe PendFileRenameOperations (Datei-Operationen, die Neustart erfordern)
+    $pendingFileOps = $false
+    try {
+        $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager"
+        $pending = Get-ItemProperty -Path $regPath -Name "PendingFileRenameOperations" -ErrorAction SilentlyContinue
+        if ($pending -and $pending.PendingFileRenameOperations) {
+            $pendingFileOps = $true
+            Write-Log "Ausstehender Neustart erkannt: PendingFileRenameOperations."
+        }
+    } catch { Write-Log "Fehler bei PendingFileRenameOperations-Pruefung: $_" }
+
+    # 5. Pruefe Dism / Image-State (für Server 2025)
+    $pendingDism = $false
+    try {
+        $result = Dism /Online /Get-Packages | Select-String "Pending"
+        if ($result) {
+            $pendingDism = $true
+            Write-Log "Ausstehender Neustart erkannt: DISM Paket-Operationen."
+        }
+    } catch { Write-Log "Fehler bei DISM-Pruefung: $_" }
+
+    $needsReboot = $pendingRebootCBS -or $pendingRebootWUA -or $pendingRebootCBS2 -or $pendingFileOps -or $pendingDism
+    
+    if ($needsReboot) {
+        Write-Log "Ausstehender Neustart erkannt! Server muss neu gestartet werden."
+    } else {
+        Write-Log "Kein ausstehender Neustart erkannt."
+    }
+    
+    return $needsReboot
+}
+
+# Versucht, haengende Neustart-Anforderungen zu bereinigen (falls moeglich)
+function Clear-PendingReboot {
+    Write-Log "Versuche, haengende Neustart-Anforderungen zu bereinigen..."
+    
+    try {
+        # Versuche, PendingFileRenameOperations zurueckzusetzen
+        $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager"
+        if (Test-Path $regPath) {
+            $pending = Get-ItemProperty -Path $regPath -Name "PendingFileRenameOperations" -ErrorAction SilentlyContinue
+            if ($pending -and $pending.PendingFileRenameOperations) {
+                Write-Log "Bereinige PendingFileRenameOperations..."
+                Remove-ItemProperty -Path $regPath -Name "PendingFileRenameOperations" -ErrorAction SilentlyContinue
+            }
+        }
+    } catch { Write-Log "Fehler beim Bereinigen von PendingFileRenameOperations: $_" }
+
+    try {
+        # Versuche, CBS-RebootPending zurueckzusetzen
+        $regPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing"
+        if (Test-Path $regPath) {
+            Remove-ItemProperty -Path $regPath -Name "RebootPending" -ErrorAction SilentlyContinue
+            Write-Log "Bereinige CBS RebootPending..."
+        }
+    } catch { Write-Log "Fehler beim Bereinigen von CBS RebootPending: $_" }
+
+    try {
+        # Versuche, ServerManager-Reboot-Flag zurueckzusetzen
+        $regPath = "HKLM:\SOFTWARE\Microsoft\ServerManager\ServicingParameters"
+        if (Test-Path $regPath) {
+            Set-ItemProperty -Path $regPath -Name "PendingReboot" -Value 0 -ErrorAction SilentlyContinue
+            Write-Log "Bereinige ServerManager PendingReboot..."
+        }
+    } catch { Write-Log "Fehler beim Bereinigen von ServerManager PendingReboot: $_" }
+}
+
 # --- Schritt 1: Domain Controller hochstufen -------------------------------
 function Step-Promote {
     Write-Log "Schritt 1: Server zum Domain Controller hochstufen."
@@ -103,9 +207,38 @@ function Step-Promote {
         }
     } catch { Write-Log "RemoteRegistry konnte nicht aktiviert werden: $_" }
 
+    # Pruefe, ob ein Neustart aussteht und behandle dies
+    if (Test-PendingReboot) {
+        Write-Log "Ausstehender Neustart erkannt. Versuche zu bereinigen..."
+        Clear-PendingReboot
+        Start-Sleep -Seconds 10
+        
+        # Pruefe erneut
+        if (Test-PendingReboot) {
+            Write-Log "Ausstehender Neustart kann nicht bereinigt werden. Fuehre Neustart durch..."
+            Save-Progress -Step "step1reboot"
+            Invoke-Reboot -NextStepName "AD-Promotion (Neustart erforderlich)"
+            return
+        }
+    }
+
     # AD DS und DNS Rollen installieren
     Write-Log "Installiere Windows-Features AD-Domain-Services und DNS..."
-    Install-WindowsFeature -Name AD-Domain-Services, DNS -IncludeManagementTools
+    try {
+        Install-WindowsFeature -Name AD-Domain-Services, DNS -IncludeManagementTools -ErrorAction Stop
+    } catch {
+        Write-Log "Fehler bei der Feature-Installation: $_"
+        
+        # Pruefe, ob der Fehler auf einen ausstehenden Neustart zurueckzufuehren ist
+        if ($_.Exception.Message -like "*restart*" -or $_.Exception.Message -like "*reboot*" -or Test-PendingReboot) {
+            Write-Log "Feature-Installation erfordert Neustart. Fuehre Neustart durch..."
+            Save-Progress -Step "step1reboot"
+            Invoke-Reboot -NextStepName "AD-Promotion (Feature-Installation)"
+            return
+        } else {
+            throw $_
+        }
+    }
 
     # Pruefen, ob bereits DC ist
     $isDC = (Get-CimInstance Win32_ComputerSystem).DomainRole -ge 4
@@ -124,9 +257,15 @@ function Step-Promote {
             -ErrorAction Stop `
            
         Write-Log "Neue Gesamtstruktur erstellt."
+        
+        # Pruefe nach der Promotion, ob ein Neustart aussteht
+        if (Test-PendingReboot) {
+            Write-Log "Ausstehender Neustart nach AD-Promotion erkannt. Fuehre Neustart durch..."
+            Save-Progress -Step "step1reboot"
+            Invoke-Reboot -NextStepName "AD-Promotion (Neustart nach Promotion)"
+            return
+        }
     }
-
-    # RemoteRegistry wieder deaktivieren nach erfolgreicher Promotion
     Write-Log "Deaktiviere RemoteRegistry-Dienst wieder nach AD-Promotion..."
     try {
         $svc = Get-Service -Name "RemoteRegistry" -ErrorAction SilentlyContinue
@@ -345,15 +484,34 @@ function Step-Cleanup {
     Write-Log "Skript abgeschlossen. Domain Controller $NetBiosName ($DomainName) ist einsatzbereit."
 }
 
+# --- Schritt 1c: AD-Promotion (Neustart erforderlich) ---------------------
+# Falls ein Neustart wegen ausstehender Features/Updates erforderlich ist
+function Step-PromoteReboot {
+    Write-Log "Schritt 1c: Neustart wegen ausstehender Aenderungen erforderlich..."
+    
+    # Pruefe erneut, ob ein Neustart aussteht
+    if (Test-PendingReboot) {
+        Write-Log "Ausstehender Neustart immer noch erkannt. Fuehre Neustart durch..."
+        Save-Progress -Step "step1reboot"
+        Invoke-Reboot -NextStepName "AD-Promotion (Neustart erforderlich)"
+        return
+    }
+    
+    # Falls kein Neustart mehr aussteht, zurueck zur Promotion
+    Write-Log "Kein ausstehender Neustart mehr erkannt. Fahre mit AD-Promotion fort..."
+    Step-Promote
+}
+
 # --- Hauptsteuerung --------------------------------------------------------
 try {
     $current = if (Test-Path $progressFile) { (Get-Content $progressFile -Raw).Trim() } else { "" }
 
     switch ($current) {
-        ""                { Create-ScheduledTask; Step-Promote }
-        "step1finish"     { Step-HardenDC }
-        "step1hardenfinish" { Step-Populate }
-        "step2finish"     { Step-Cleanup }
+        ""                     { Create-ScheduledTask; Step-Promote }
+        "step1reboot"          { Step-PromoteReboot }
+        "step1finish"          { Step-HardenDC }
+        "step1hardenfinish"    { Step-Populate }
+        "step2finish"          { Step-Cleanup }
         default {
             Write-Log "Unbekannter Fortschrittsstatus '$current'. Breche ab."
             Remove-ScheduledTask
