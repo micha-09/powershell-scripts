@@ -46,8 +46,12 @@ Dieses Repository enthaelt PowerShell-Skripte zur Automatisierung der Bereitstel
 ### 2. [Create_AD.ps1](./Create_AD.ps1)
 **Zweck:** Hochstufen des Servers zum Domain Controller und Befuellen der Domaene mit Tiering-Struktur und GPOs.
 
+#### Sicherheitsmassnahme:
+Das Administrator-Konto (SID-500) wird **zu Beginn** mit einem zufaelligen Kennwort gesichert, damit **waehrend des gesamten Setups keine Anmeldung am DC moeglich** ist. Erst im letzten Schritt (`Step-Cleanup`) wird das gewuenschte Kennwort gesetzt (Parameter `-AdminPassword`).
+
 #### Funktionen:
 - **Schritt 1: Domain Controller hochstufen**
+  - **Sicherheitsmassnahme: Zufaelliges Admin-Kennwort setzen** (Login gesperrt)
   - **Pruefung auf ausstehende Neustarts** (maximal 1 Neustart vor der Rolleninstallation):
     1. Pruefe zu Beginn ob Neustarts ausstehen
     2. Falls JA: **Sofortiger Neustart** → `Step-PromoteCheck`
@@ -57,9 +61,11 @@ Dieses Repository enthaelt PowerShell-Skripte zur Automatisierung der Bereitstel
   - `RemoteRegistry` temporaer aktivieren (erforderlich fuer AD-Promotion)
   - AD DS und DNS Rollen installieren
   - Neue Gesamtstruktur erstellen (`Install-ADDSForest`)
+  - **Nach der Promotion: Domain-Admin mit zufaelligem Kennwort sichern**
   - `RemoteRegistry` nach der Promotion wieder deaktivieren
 
 - **Schritt 1b: Neustart-Pruefung (`Step-PromoteCheck`)**
+  - **Zufaelliges Admin-Kennwort setzen** (falls nach Neustart noetig)
   - Prueft nach dem Neustart erneut auf ausstehende Neustarts
   - Falls ja: **Bereinigung der Flags** (`Clear-PendingReboot`)
   - **Fuehrt direkt die Rolleninstallation aus** (kein erneuter Aufruf von `Step-Promote`)
@@ -103,7 +109,7 @@ Dieses Repository enthaelt PowerShell-Skripte zur Automatisierung der Bereitstel
       - Alle Admins duerfen kein RDP nutzen
 
 - **Schritt 4: Aufraeumen**
-  - **Admin-Passwort auf gewuenschten Wert setzen** (letzter Schritt)
+  - **Admin-Kennwort auf gewuenschten Wert setzen** (`-AdminPassword`, Login wieder moeglich)
   - Plante Aufgabe entfernen
   - Gruppenrichtlinien aktualisieren
 
@@ -136,7 +142,7 @@ powershell.exe -ExecutionPolicy Bypass -File .\VM_Basic.ps1 -StaticIP "192.168.1
 
 ### 2. Create_AD.ps1 ausfuehren
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File .\Create_AD.ps1 -DomainName "corp.example.com" -NetBiosName "CORP" -DsrmPassword "P@ssw0rd!2025"
+powershell.exe -ExecutionPolicy Bypass -File .\Create_AD.ps1 -DomainName "corp.example.com" -NetBiosName "CORP" -DsrmPassword "P@ssw0rd!2025" -AdminPassword "P@ssw0rd!2025"
 ```
 
 ### 3. (Optional) Create_DemoData.ps1 ausfuehren
@@ -222,6 +228,7 @@ Die folgende Liste von Diensten wird in `VM_Basic.ps1` deaktiviert, um Sicherhei
 
 ### [Latest](https://github.com/micha-09/powershell-scripts/commit/main)
 - **Create_AD.ps1:**
+  - **Neue Sicherheitsmassnahme:** Admin-Konto (SID-500) wird waehrend des Setups mit zufaelligem Kennwort gesperrt, erst am Ende wird das gewuenschte Kennwort gesetzt (`-AdminPassword` Parameter)
   - Korrigierte Neustart-Logik: Maximal 1 Neustart vor der Rolleninstallation
   - `Step-PromoteCheck` fuehrt direkt die Rolleninstallation aus (keine Endlosschleife mehr)
   - Robustere Pruefung auf ausstehende Neustarts (CBS, Windows Update, DISM, etc.)

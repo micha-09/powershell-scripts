@@ -9,7 +9,11 @@
 
       Schritt 1: DC hochstufen  (AD DS + DNS installieren, Forest erstellen)
       Schritt 2: Domaene befuellen (OUs, Gruppen, Benutzer, Computer als Musterdaten)
-      Schritt 3: Aufraeumen     (geplante Aufgabe entfernen, Fortschrittsdatei loeschen)
+      Schritt 3: Aufraeumen     (Admin-Kennwort setzen, geplante Aufgabe entfernen, Fortschrittsdatei loeschen)
+
+    Sicherheitsmassnahme: Das Administrator-Konto (SID-500) wird zu Beginn mit einem
+    zufaelligen Kennwort gesichert, damit waehrend des gesamten Setups keine Anmeldung
+    am DC moeglich ist. Erst im letzten Schritt wird das gewuenschte Kennwort gesetzt.
 
     Nach Abschluss steht ein fertiger, gehaerteter Domain Controller bereit.
 
@@ -29,6 +33,9 @@
 .PARAMETER DsrmPassword
     Kennwort fuer den Verzeichnisdienst-Wiederherstellungsmodus (DSRM).
 
+.PARAMETER AdminPassword
+    Kennwort fuer den Domain Administrator (wird am Ende gesetzt).
+
 .EXAMPLE
     powershell.exe -ExecutionPolicy Bypass -File .\Create_AD.ps1 -DomainName "corp.example.com" -NetBiosName "CORP" -DsrmPassword "P@ssw0rd!2025"
 #>
@@ -37,7 +44,8 @@
 param (
     [string]$DomainName       = "dev.lab",
     [string]$NetBiosName      = "dev",
-    [string]$DsrmPassword     = "Fenster2020!"
+    [string]$DsrmPassword     = "Fenster2020!",
+    [string]$AdminPassword    = "P@ssw0rd!2025"
 )
 
 $ErrorActionPreference = "Stop"
@@ -72,7 +80,7 @@ function Invoke-Reboot {
 
 function Create-ScheduledTask {
     Write-Log "Erzeuge geplante Aufgabe '$taskName' fuer den Autostart nach Neustart."
-    $action    = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -DomainName `"$DomainName`" -NetBiosName `"$NetBiosName`" -DsrmPassword `"$DsrmPassword`""
+    $action    = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -DomainName `"$DomainName`" -NetBiosName `"$NetBiosName`" -DsrmPassword `"$DsrmPassword`" -AdminPassword `"$AdminPassword`""
     $trigger   = New-ScheduledTaskTrigger -AtStartup
     $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
     $settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
@@ -82,6 +90,55 @@ function Create-ScheduledTask {
 function Remove-ScheduledTask {
     Write-Log "Entferne geplante Aufgabe '$taskName'."
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+}
+
+# Setzt ein zufaelliges Kennwort fuer das Administrator-Konto (SID-500).
+# Verhindert die Anmeldung am DC, solange das Skript noch nicht vollstaendig durchgelaufen ist.
+function Set-RandomAdminPassword {
+    $randomPwd = -join ((48..57) + (65..90) + (97..122) + (35..38) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
+    $securePwd  = ConvertTo-SecureString $randomPwd -AsPlainText -Force
+
+    $isDC = (Get-CimInstance Win32_ComputerSystem).DomainRole -ge 4
+    if ($isDC) {
+        try {
+            if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
+                Install-WindowsFeature -Name RSAT-AD-PowerShell -ErrorAction SilentlyContinue
+            }
+            Import-Module ActiveDirectory -ErrorAction Stop
+            $domainSid = (Get-ADDomain).DomainSID.Value
+            $admin = Get-ADUser -Identity "$domainSid-500" -ErrorAction SilentlyContinue
+            if ($admin) {
+                Set-ADAccountPassword -Identity $admin.SamAccountName -NewPassword $securePwd -Reset -ErrorAction Stop
+                Write-Log "Domain Administrator mit zufaelligem Kennwort gesichert (Login gesperrt bis Skriptende)."
+            }
+        } catch { Write-Log "Zufaelliges Admin-Kennwort (Domain) konnte nicht gesetzt werden: $_" }
+    } else {
+        try {
+            $admin = Get-LocalUser | Where-Object { $_.SID -like "S-1-5-21-*-500" }
+            if ($admin) {
+                Set-LocalUser -Name $admin.Name -Password $securePwd -ErrorAction SilentlyContinue
+                Write-Log "Lokaler Administrator mit zufaelligem Kennwort gesichert (Login gesperrt bis Skriptende)."
+            }
+        } catch { Write-Log "Zufaelliges Admin-Kennwort (lokal) konnte nicht gesetzt werden: $_" }
+    }
+}
+
+# Setzt das finale Admin-Kennwort am Ende des Skripts (Domain Administrator).
+# Erst nach diesem Schritt ist eine Anmeldung am DC wieder moeglich.
+function Set-FinalAdminPassword {
+    try {
+        if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
+            Install-WindowsFeature -Name RSAT-AD-PowerShell -ErrorAction SilentlyContinue
+        }
+        Import-Module ActiveDirectory -ErrorAction Stop
+        $domainSid = (Get-ADDomain).DomainSID.Value
+        $admin = Get-ADUser -Identity "$domainSid-500" -ErrorAction SilentlyContinue
+        if ($admin) {
+            $securePwd = ConvertTo-SecureString $AdminPassword -AsPlainText -Force
+            Set-ADAccountPassword -Identity $admin.SamAccountName -NewPassword $securePwd -Reset -ErrorAction Stop
+            Write-Log "Domain Administrator Kennwort auf gewuenschten Wert gesetzt (Login wieder moeglich)."
+        }
+    } catch { Write-Log "Finales Admin-Kennwort konnte nicht gesetzt werden: $_" }
 }
 
 # Prueft, ob ein Neustart des Servers aussteht (Windows Features, Updates, etc.)
@@ -192,6 +249,10 @@ function Clear-PendingReboot {
 function Step-Promote {
     Write-Log "Schritt 1: Server zum Domain Controller hochstufen."
 
+    # Sicherheitsmassnahme: Admin-Konto sofort mit zufaelligem Kennwort sichern,
+    # damit waehrend des gesamten Setups keine Anmeldung moeglich ist.
+    Set-RandomAdminPassword
+
     # Pruefe zu beginn ob neustarts ausstehen, falls ja neustarten
     if (Test-PendingReboot) {
         Write-Log "Ausstehender Neustart erkannt. Fuehre Neustart durch..."
@@ -236,6 +297,11 @@ function Step-Promote {
            
         Write-Log "Neue Gesamtstruktur erstellt."
     }
+    
+    # Sicherheitsmassnahme: Nach der Promotion den Domain Administrator mit
+    # zufaelligem Kennwort sichern (Login bleibt gesperrt bis Skriptende).
+    Set-RandomAdminPassword
+    
     Write-Log "Deaktiviere RemoteRegistry-Dienst wieder nach AD-Promotion..."
     try {
         $svc = Get-Service -Name "RemoteRegistry" -ErrorAction SilentlyContinue
@@ -444,6 +510,9 @@ function Step-Populate {
 function Step-PromoteCheck {
     Write-Log "Schritt 1b: Pruefe nach Neustart auf ausstehende Aenderungen..."
     
+    # Sicherheitsmassnahme: Admin-Konto mit zufaelligem Kennwort sichern (Login gesperrt)
+    Set-RandomAdminPassword
+    
     # Pruefe nach diesem neustart nochmal ob Neustarts ausstehen, falls ja mache das clearing der pending reboots
     if (Test-PendingReboot) {
         Write-Log "Ausstehender Neustart immer noch erkannt. Bereinige Flags..."
@@ -487,6 +556,11 @@ function Step-PromoteCheck {
            
         Write-Log "Neue Gesamtstruktur erstellt."
     }
+    
+    # Sicherheitsmassnahme: Nach der Promotion den Domain Administrator mit
+    # zufaelligem Kennwort sichern (Login bleibt gesperrt bis Skriptende).
+    Set-RandomAdminPassword
+    
     Write-Log "Deaktiviere RemoteRegistry-Dienst wieder nach AD-Promotion..."
     try {
         $svc = Get-Service -Name "RemoteRegistry" -ErrorAction SilentlyContinue
@@ -504,6 +578,10 @@ function Step-PromoteCheck {
 # --- Schritt 3: Aufraeumen -------------------------------------------------
 function Step-Cleanup {
     Write-Log "Schritt 3: Aufraeumen - Domaene ist fertig."
+    
+    # Sicherheitsmassnahme: Finales Admin-Kennwort setzen (Login wieder moeglich)
+    Set-FinalAdminPassword
+    
     Remove-ScheduledTask
     Remove-Item -Path $progressFile -Force -ErrorAction SilentlyContinue
     # Letzte GPO-Verifikation nach Abschluss
