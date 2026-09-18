@@ -298,20 +298,19 @@ function Step-Populate {
     # Tiering-Struktur OUs anlegen
     Write-Log "Erstelle Tiering-Struktur OUs..."
     $tieringOUs = @(
-        @{ Name = "Unternehmen";       Path = $baseDN },
-        @{ Name = "Tier0";             Path = "OU=Unternehmen,$baseDN" },
-        @{ Name = "T0-Admins";         Path = "OU=Tier0,OU=Unternehmen,$baseDN" },
-        @{ Name = "T0-Servers";        Path = "OU=Tier0,OU=Unternehmen,$baseDN" },
-        @{ Name = "Tier1";             Path = "OU=Unternehmen,$baseDN" },
-        @{ Name = "T1-Admins";         Path = "OU=Tier1,OU=Unternehmen,$baseDN" },
-        @{ Name = "T1-Servers";        Path = "OU=Tier1,OU=Unternehmen,$baseDN" },
-        @{ Name = "Tier2";             Path = "OU=Unternehmen,$baseDN" },
-        @{ Name = "T2-Users";          Path = "OU=Tier2,OU=Unternehmen,$baseDN" },
-        @{ Name = "T2-Admins";         Path = "OU=Tier2,OU=Unternehmen,$baseDN" },
-        @{ Name = "T2-Clients";        Path = "OU=Tier2,OU=Unternehmen,$baseDN" },
-        @{ Name = "Gruppen";           Path = "OU=Unternehmen,$baseDN" },
-        @{ Name = "ServiceAccounts";  Path = "OU=Unternehmen,$baseDN" },
-        @{ Name = "Benutzer";          Path = "OU=Unternehmen,$baseDN" }
+        @{ Name = "Tier0";             Path = $baseDN },
+        @{ Name = "T0-Admins";         Path = "OU=Tier0,$baseDN" },
+        @{ Name = "T0-Servers";        Path = "OU=Tier0,$baseDN" },
+        @{ Name = "Tier1";             Path = $baseDN },
+        @{ Name = "T1-Admins";         Path = "OU=Tier1,$baseDN" },
+        @{ Name = "T1-Servers";        Path = "OU=Tier1,$baseDN" },
+        @{ Name = "Tier2";             Path = $baseDN },
+        @{ Name = "T2-Users";          Path = "OU=Tier2,$baseDN" },
+        @{ Name = "T2-Admins";         Path = "OU=Tier2,$baseDN" },
+        @{ Name = "T2-Clients";        Path = "OU=Tier2,$baseDN" },
+        @{ Name = "Gruppen";           Path = $baseDN },
+        @{ Name = "ServiceAccounts";  Path = $baseDN },
+        @{ Name = "Benutzer";          Path = $baseDN }
     )
     foreach ($ou in $tieringOUs) {
         try {
@@ -325,10 +324,10 @@ function Step-Populate {
     # Sicherheitsgruppen fuer Tiering anlegen
     Write-Log "Erstelle Sicherheitsgruppen fuer Tiering..."
     $tieringGroups = @(
-        @{ Name = "T0-Admins";         Desc = "Tier 0 Administratoren (DC, PKI)";          Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
-        @{ Name = "T1-Admins";         Desc = "Tier 1 Administratoren (SQL, Exchange)";    Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
-        @{ Name = "T2-Admins";         Desc = "Tier 2 Administratoren (Helpdesk Level 1)";  Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
-        @{ Name = "T2-Users";          Desc = "Tier 2 Benutzer (Normale Mitarbeiter)";      Path = "OU=Gruppen,OU=Unternehmen,$baseDN" }
+        @{ Name = "T0-Admins";         Desc = "Tier 0 Administratoren (DC, PKI)";          Path = "OU=Gruppen,$baseDN" },
+        @{ Name = "T1-Admins";         Desc = "Tier 1 Administratoren (SQL, Exchange)";    Path = "OU=Gruppen,$baseDN" },
+        @{ Name = "T2-Admins";         Desc = "Tier 2 Administratoren (Helpdesk Level 1)";  Path = "OU=Gruppen,$baseDN" },
+        @{ Name = "T2-Users";          Desc = "Tier 2 Benutzer (Normale Mitarbeiter)";      Path = "OU=Gruppen,$baseDN" }
     )
     foreach ($g in $tieringGroups) {
         try {
@@ -373,7 +372,7 @@ function Step-Populate {
         Set-GPRegistryValue -Name $gpoT0 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Group Policy\RestrictedGroups\Administrators" -ValueName "Members" -Type MultiString -Value @("T0-Admins") -ErrorAction SilentlyContinue
         
         # Verknupfen mit T0-Servers OU
-        New-GPLink -Name $gpoT0 -Target "OU=T0-Servers,OU=Tier0,OU=Unternehmen,$baseDN" -LinkEnabled Yes
+        New-GPLink -Name $gpoT0 -Target "OU=T0-Servers,OU=Tier0,$baseDN" -LinkEnabled Yes
         Write-Log "GPO '$gpoT0' erstellt und mit T0-Servers verknupft."
     }
 
@@ -396,7 +395,7 @@ function Step-Populate {
         Set-GPRegistryValue -Name $gpoT1 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Group Policy\RestrictedGroups\Administrators" -ValueName "Members" -Type MultiString -Value @("T1-Admins") -ErrorAction SilentlyContinue
         
         # Verknupfen mit T1-Servers OU
-        New-GPLink -Name $gpoT1 -Target "OU=T1-Servers,OU=Tier1,OU=Unternehmen,$baseDN" -LinkEnabled Yes
+        New-GPLink -Name $gpoT1 -Target "OU=T1-Servers,OU=Tier1,$baseDN" -LinkEnabled Yes
         Write-Log "GPO '$gpoT1' erstellt und mit T1-Servers verknupft."
     }
 
@@ -419,7 +418,7 @@ function Step-Populate {
         Set-GPRegistryValue -Name $gpoT2 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Group Policy\RestrictedGroups\Administrators" -ValueName "Members" -Type MultiString -Value @("T2-Admins") -ErrorAction SilentlyContinue
         
         # Verknupfen mit T2-Clients OU
-        New-GPLink -Name $gpoT2 -Target "OU=T2-Clients,OU=Tier2,OU=Unternehmen,$baseDN" -LinkEnabled Yes
+        New-GPLink -Name $gpoT2 -Target "OU=T2-Clients,OU=Tier2,$baseDN" -LinkEnabled Yes
         Write-Log "GPO '$gpoT2' erstellt und mit T2-Clients verknupft."
     }
 
