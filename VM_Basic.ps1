@@ -8,7 +8,7 @@
 
       Schritt 1: Initialisierung   (geplante Aufgabe anlegen, ggf. statische IP setzen, Basis-Konfig)
       Schritt 2: Server optimieren  (Powerplan, Dienste, Updates, Zeitzone, deutsche Lokalisierung, etc.)
-      Schritt 3: Aufraeumen        (geplante Aufgabe entfernen, Fortschrittsdatei loeschen)
+      Schritt 3: Aufraeumen        (Admin-Passwort setzen, geplante Aufgabe entfernen, Fortschrittsdatei loeschen)
 
     Nach Abschluss steht ein fertig optimierter Server bereit, der anschliessend
     z.B. mit Create_AD.ps1 zum Domain Controller hochgestuft wird (Haertung dort).
@@ -46,7 +46,7 @@ param (
     [string]$DefaultGateway   = "192.168.10.1",
     [string]$DnsServer        = "127.0.0.1",
     [string]$LocalAdminName   = "LokalAdmin",
-    [string]$LocalAdminPwd    = "Fenster2020!!"
+    [string]$LocalAdminPwd    = "P@ssw0rd!2025"
 )
 
 $ErrorActionPreference = "Stop"
@@ -287,14 +287,16 @@ function Step-Optimize {
     Get-ChildItem "C:\Windows\Temp","$env:TEMP" -ErrorAction SilentlyContinue |
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
-    # Lokaler Administrator umbenennen und Kennwort setzen (falls vorhanden)
+    # Lokaler Administrator umbenennen und zufaelliges Kennwort setzen (verhindert Anmeldung waehrend Setup)
     try {
         $admin = Get-LocalUser | Where-Object { $_.SID -like "S-1-5-21-*-500" }
         if ($admin) {
             Rename-LocalUser -Name $admin.Name -NewName $LocalAdminName -ErrorAction SilentlyContinue
-            Set-LocalUser -Name $LocalAdminName -Password (ConvertTo-SecureString $LocalAdminPwd -AsPlainText -Force) -ErrorAction SilentlyContinue
+            # Setze zufaelliges Passwort, um Anmeldung waehrend des Setups zu verhindern
+            $randomPwd = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 20 | ForEach-Object { [char]$_ })
+            Set-LocalUser -Name $LocalAdminName -Password (ConvertTo-SecureString $randomPwd -AsPlainText -Force) -ErrorAction SilentlyContinue
             Enable-LocalUser -Name $LocalAdminName -ErrorAction SilentlyContinue
-            Write-Log "Lokaler Administrator umbenannt/aktiviert: $LocalAdminName"
+            Write-Log "Lokaler Administrator umbenannt und mit zufaelligem Passwort gesichert: $LocalAdminName"
         }
     } catch { Write-Log "Lokaler Administrator nicht angepasst: $_" }
 
@@ -305,6 +307,16 @@ function Step-Optimize {
 # --- Schritt 3: Aufraeumen -------------------------------------------------
 function Step-Cleanup {
     Write-Log "Schritt 3: Aufraeumen - Server ist optimiert."
+    
+    # Setze das gewuenschte Admin-Passwort als letzten Schritt
+    try {
+        $admin = Get-LocalUser -Name $LocalAdminName -ErrorAction SilentlyContinue
+        if ($admin) {
+            Set-LocalUser -Name $LocalAdminName -Password (ConvertTo-SecureString $LocalAdminPwd -AsPlainText -Force) -ErrorAction SilentlyContinue
+            Write-Log "Lokaler Administrator Passwort auf gewuenschten Wert gesetzt: $LocalAdminName"
+        }
+    } catch { Write-Log "Admin-Passwort konnte nicht gesetzt werden: $_" }
+    
     Remove-ScheduledTask
     Remove-Item -Path $progressFile -Force -ErrorAction SilentlyContinue
     Write-Log "Skript abgeschlossen. Server ist einsatzbereit (z.B. fuer Create_AD.ps1)."
