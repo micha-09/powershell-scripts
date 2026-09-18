@@ -349,6 +349,15 @@ function Step-Populate {
         Write-Log "Erstelle GPO: $gpoT0"
         $newGPO = New-GPO -Name $gpoT0
         
+        # User Rights Assignment: Deny log on locally für alle außer T0-Admins
+        Set-GPRegistryValue -Name $gpoT0 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Policies\System" -ValueName "DenyLogOnLocally" -Type MultiString -Value @("T1-Admins", "T1-Server-Admins", "T2-Admins", "T2-Users", "T2-Client-Admins") -ErrorAction SilentlyContinue
+        
+        # User Rights Assignment: Allow log on locally für T0-Admins
+        Set-GPRegistryValue -Name $gpoT0 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Policies\System" -ValueName "AllowLogOnLocally" -Type MultiString -Value @("T0-Admins") -ErrorAction SilentlyContinue
+        
+        # Restricted Groups: T0-Admins als Mitglieder der lokalen Administratoren
+        Set-GPRegistryValue -Name $gpoT0 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Group Policy\RestrictedGroups\Administrators" -ValueName "Members" -Type MultiString -Value @("T0-Admins") -ErrorAction SilentlyContinue
+        
         # Verknüpfen mit T0-Servers OU
         New-GPLink -Name $gpoT0 -Target "OU=T0-Servers,OU=Tier0,OU=Unternehmen,$baseDN" -LinkEnabled Yes
         Write-Log "GPO '$gpoT0' erstellt und mit T0-Servers verknüpft."
@@ -360,6 +369,15 @@ function Step-Populate {
         Write-Log "Erstelle GPO: $gpoT1"
         $newGPO = New-GPO -Name $gpoT1
         
+        # User Rights Assignment: Deny log on locally für alle außer T1-Admins
+        Set-GPRegistryValue -Name $gpoT1 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Policies\System" -ValueName "DenyLogOnLocally" -Type MultiString -Value @("T0-Admins", "T0-Server-Admins", "T2-Admins", "T2-Users", "T2-Client-Admins") -ErrorAction SilentlyContinue
+        
+        # User Rights Assignment: Allow log on locally für T1-Admins
+        Set-GPRegistryValue -Name $gpoT1 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Policies\System" -ValueName "AllowLogOnLocally" -Type MultiString -Value @("T1-Admins") -ErrorAction SilentlyContinue
+        
+        # Restricted Groups: T1-Admins als Mitglieder der lokalen Administratoren
+        Set-GPRegistryValue -Name $gpoT1 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Group Policy\RestrictedGroups\Administrators" -ValueName "Members" -Type MultiString -Value @("T1-Admins") -ErrorAction SilentlyContinue
+        
         # Verknüpfen mit T1-Servers OU
         New-GPLink -Name $gpoT1 -Target "OU=T1-Servers,OU=Tier1,OU=Unternehmen,$baseDN" -LinkEnabled Yes
         Write-Log "GPO '$gpoT1' erstellt und mit T1-Servers verknüpft."
@@ -370,6 +388,15 @@ function Step-Populate {
     if (-not (Get-GPO -Name $gpoT2 -ErrorAction SilentlyContinue)) {
         Write-Log "Erstelle GPO: $gpoT2"
         $newGPO = New-GPO -Name $gpoT2
+        
+        # User Rights Assignment: Deny log on locally für alle außer T2-Admins und T2-Users
+        Set-GPRegistryValue -Name $gpoT2 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Policies\System" -ValueName "DenyLogOnLocally" -Type MultiString -Value @("T0-Admins", "T0-Server-Admins", "T1-Admins", "T1-Server-Admins") -ErrorAction SilentlyContinue
+        
+        # User Rights Assignment: Allow log on locally für T2-Admins und T2-Users
+        Set-GPRegistryValue -Name $gpoT2 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Policies\System" -ValueName "AllowLogOnLocally" -Type MultiString -Value @("T2-Admins", "T2-Users") -ErrorAction SilentlyContinue
+        
+        # Restricted Groups: T2-Admins als Mitglieder der lokalen Administratoren
+        Set-GPRegistryValue -Name $gpoT2 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Group Policy\RestrictedGroups\Administrators" -ValueName "Members" -Type MultiString -Value @("T2-Admins") -ErrorAction SilentlyContinue
         
         # Verknüpfen mit T2-Clients OU
         New-GPLink -Name $gpoT2 -Target "OU=T2-Clients,OU=Tier2,OU=Unternehmen,$baseDN" -LinkEnabled Yes
