@@ -209,17 +209,10 @@ function Step-Promote {
 
     # Pruefe, ob ein Neustart aussteht und behandle dies
     if (Test-PendingReboot) {
-        Write-Log "Ausstehender Neustart erkannt. Versuche zu bereinigen..."
-        Clear-PendingReboot
-        Start-Sleep -Seconds 10
-        
-        # Pruefe erneut
-        if (Test-PendingReboot) {
-            Write-Log "Ausstehender Neustart kann nicht bereinigt werden. Fuehre Neustart durch..."
-            Save-Progress -Step "step1reboot"
-            Invoke-Reboot -NextStepName "AD-Promotion (Neustart erforderlich)"
-            return
-        }
+        Write-Log "Ausstehender Neustart erkannt. Fuehre Neustart durch..."
+        Save-Progress -Step "step1reboot"
+        Invoke-Reboot -NextStepName "AD-Promotion (Neustart erforderlich)"
+        return
     }
 
     # AD DS und DNS Rollen installieren
@@ -233,7 +226,7 @@ function Step-Promote {
         if ($_.Exception.Message -like "*restart*" -or $_.Exception.Message -like "*reboot*" -or Test-PendingReboot) {
             Write-Log "Feature-Installation erfordert Neustart. Fuehre Neustart durch..."
             Save-Progress -Step "step1reboot"
-            Invoke-Reboot -NextStepName "AD-Promotion (Feature-Installation)"
+            Invoke-Reboot -NextStepName "AD-Promotion (Neustart erforderlich)"
             return
         } else {
             throw $_
@@ -257,14 +250,6 @@ function Step-Promote {
             -ErrorAction Stop `
            
         Write-Log "Neue Gesamtstruktur erstellt."
-        
-        # Pruefe nach der Promotion, ob ein Neustart aussteht
-        if (Test-PendingReboot) {
-            Write-Log "Ausstehender Neustart nach AD-Promotion erkannt. Fuehre Neustart durch..."
-            Save-Progress -Step "step1reboot"
-            Invoke-Reboot -NextStepName "AD-Promotion (Neustart nach Promotion)"
-            return
-        }
     }
     Write-Log "Deaktiviere RemoteRegistry-Dienst wieder nach AD-Promotion..."
     try {
@@ -497,8 +482,12 @@ function Step-PromoteReboot {
         return
     }
     
-    # Falls kein Neustart mehr aussteht, zurueck zur Promotion
-    Write-Log "Kein ausstehender Neustart mehr erkannt. Fahre mit AD-Promotion fort..."
+    # Falls kein Neustart mehr aussteht, bereinige unnoetige Flags und fahre fort
+    Write-Log "Kein ausstehender Neustart mehr erkannt. Bereinige unnoetige Flags..."
+    Clear-PendingReboot
+    Start-Sleep -Seconds 5
+    
+    Write-Log "Fahre mit AD-Promotion fort..."
     Step-Promote
 }
 
