@@ -402,7 +402,7 @@ function Step-Populate {
     )
     foreach ($g in $tieringGroups) {
         try {
-            if (-not (Get-ADGroup -Identity $g.Name -Server $adServer -ErrorAction SilentlyContinue)) {
+            if (-not (Get-ADGroup -Filter "Name -eq '$($g.Name)'" -Server $adServer -ErrorAction SilentlyContinue)) {
                 New-ADGroup -Name $g.Name -GroupCategory Security -GroupScope Global -Description $g.Desc -Path $g.Path -Server $adServer -ErrorAction Stop
                 Write-Log "Gruppe angelegt: $($g.Name)"
             }
