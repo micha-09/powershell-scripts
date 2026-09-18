@@ -215,14 +215,6 @@ function Step-Promote {
         }
     } catch { Write-Log "RemoteRegistry konnte nicht aktiviert werden: $_" }
 
-    # Pruefe nach diesem neustart nochmal ob Neustarts ausstehen, falls ja mache das clearing der pending reboots
-    if (Test-PendingReboot) {
-        Write-Log "Ausstehender Neustart immer noch erkannt. Bereinige Flags..."
-        Clear-PendingReboot
-        Start-Sleep -Seconds 5
-    }
-
-    # Anschliessend mache mit der installieren der ad rolle weiter
     # AD DS und DNS Rollen installieren
     Write-Log "Installiere Windows-Features AD-Domain-Services und DNS..."
     Install-WindowsFeature -Name AD-Domain-Services, DNS -IncludeManagementTools -ErrorAction Stop
@@ -463,8 +455,9 @@ function Step-Cleanup {
     Write-Log "Skript abgeschlossen. Domain Controller $NetBiosName ($DomainName) ist einsatzbereit."
 }
 
-# --- Schritt 1b: AD-Promotion (Neustart-Pruefung) -------------------------
+# --- Schritt 1b: AD-Promotion (Rolleninstallation nach Neustart-Pruefung) ---
 # Nach Neustart: Pruefe nochmal ob Neustarts ausstehen, falls ja clearing durchfuehren
+# und dann direkt mit der Rolleninstallation weitermachen
 function Step-PromoteCheck {
     Write-Log "Schritt 1b: Pruefe nach Neustart auf ausstehende Aenderungen..."
     
@@ -475,9 +468,54 @@ function Step-PromoteCheck {
         Start-Sleep -Seconds 5
     }
     
-    # Anschliessend mache mit der installieren der ad rolle weiter
+    # Anschliessend direkt mit der Rolleninstallation weitermachen (ohne Step-Promote aufzurufen)
     Write-Log "Fahre mit der Rolleninstallation fort..."
-    Step-Promote
+    
+    # RemoteRegistry temporaer aktivieren (benoetigt fuer AD-Promotion)
+    Write-Log "Aktiviere RemoteRegistry-Dienst temporaer fuer AD-Promotion..."
+    try {
+        $svc = Get-Service -Name "RemoteRegistry" -ErrorAction SilentlyContinue
+        if ($svc) {
+            Set-Service -Name "RemoteRegistry" -StartupType Automatic -ErrorAction SilentlyContinue
+            Start-Service -Name "RemoteRegistry" -ErrorAction SilentlyContinue
+            Write-Log "RemoteRegistry-Dienst aktiviert und gestartet."
+        }
+    } catch { Write-Log "RemoteRegistry konnte nicht aktiviert werden: $_" }
+
+    # AD DS und DNS Rollen installieren
+    Write-Log "Installiere Windows-Features AD-Domain-Services und DNS..."
+    Install-WindowsFeature -Name AD-Domain-Services, DNS -IncludeManagementTools -ErrorAction Stop
+
+    # Pruefen, ob bereits DC ist
+    $isDC = (Get-CimInstance Win32_ComputerSystem).DomainRole -ge 4
+    if ($isDC) {
+        Write-Log "Server ist bereits Domain Controller - Promotion uebersprungen."
+    } else {
+        $secureDsrm = ConvertTo-SecureString $DsrmPassword -AsPlainText -Force
+        Write-Log "Erstelle neue Gesamtstruktur '$DomainName' (NetBIOS $NetBiosName)..."
+        Install-ADDSForest `\
+            -DomainName $DomainName `\
+            -DomainNetbiosName $NetBiosName `\
+            -SafeModeAdministratorPassword $secureDsrm `\
+            -InstallDNS `\
+            -NoRebootOnCompletion `\
+            -Force `\
+            -ErrorAction Stop `\
+           
+        Write-Log "Neue Gesamtstruktur erstellt."
+    }
+    Write-Log "Deaktiviere RemoteRegistry-Dienst wieder nach AD-Promotion..."
+    try {
+        $svc = Get-Service -Name "RemoteRegistry" -ErrorAction SilentlyContinue
+        if ($svc) {
+            Stop-Service -Name "RemoteRegistry" -Force -ErrorAction SilentlyContinue
+            Set-Service -Name "RemoteRegistry" -StartupType Disabled -ErrorAction SilentlyContinue
+            Write-Log "RemoteRegistry-Dienst deaktiviert."
+        }
+    } catch { Write-Log "RemoteRegistry konnte nicht deaktiviert werden: $_" }
+
+    Save-Progress -Step "step1finish"
+    Invoke-Reboot -NextStepName "Haertung als Domain Controller"
 }
 
 # --- Hauptsteuerung --------------------------------------------------------
