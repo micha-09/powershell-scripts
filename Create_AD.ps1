@@ -35,8 +35,8 @@
 
 [CmdletBinding()]
 param (
-    [string]$DomainName      = "corp.example.com",
-    [string]$NetBiosName      = "CORP",
+    [string]$DomainName       = "dev.lab",
+    [string]$NetBiosName      = "dev",
     [string]$DsrmPassword     = "Fenster2020!"
 )
 
