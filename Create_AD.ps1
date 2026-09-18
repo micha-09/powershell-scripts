@@ -136,7 +136,7 @@ function Test-PendingReboot {
         }
     } catch { Write-Log "Fehler bei PendingFileRenameOperations-Pruefung: $_" }
 
-    # 5. Pruefe Dism / Image-State (für Server 2025)
+    # 5. Pruefe Dism / Image-State (fuer Server 2025)
     $pendingDism = $false
     try {
         $result = Dism /Online /Get-Packages | Select-String "Pending"
@@ -204,6 +204,9 @@ function Step-Promote {
         return
     }
 
+    # Kein Neustart ausstehend - fahre direkt mit der Promotion fort
+    Write-Log "Kein ausstehender Neustart - fahre mit Promotion fort."
+    
     # RemoteRegistry temporaer aktivieren (benoetigt fuer AD-Promotion)
     Write-Log "Aktiviere RemoteRegistry-Dienst temporaer fuer AD-Promotion..."
     try {
@@ -226,14 +229,14 @@ function Step-Promote {
     } else {
         $secureDsrm = ConvertTo-SecureString $DsrmPassword -AsPlainText -Force
         Write-Log "Erstelle neue Gesamtstruktur '$DomainName' (NetBIOS $NetBiosName)..."
-        Install-ADDSForest `
-            -DomainName $DomainName `
-            -DomainNetbiosName $NetBiosName `
-            -SafeModeAdministratorPassword $secureDsrm `
-            -InstallDNS `
-            -NoRebootOnCompletion `
-            -Force `
-            -ErrorAction Stop `
+        Install-ADDSForest `\
+            -DomainName $DomainName `\
+            -DomainNetbiosName $NetBiosName `\
+            -SafeModeAdministratorPassword $secureDsrm `\
+            -InstallDNS `\
+            -NoRebootOnCompletion `\
+            -Force `\
+            -ErrorAction Stop `\
            
         Write-Log "Neue Gesamtstruktur erstellt."
     }
@@ -323,8 +326,8 @@ function Step-Populate {
         } catch { Write-Log "OU '$($ou.Name)' nicht angelegt: $_" }
     }
 
-    # Sicherheitsgruppen für Tiering anlegen
-    Write-Log "Erstelle Sicherheitsgruppen für Tiering..."
+    # Sicherheitsgruppen fuer Tiering anlegen
+    Write-Log "Erstelle Sicherheitsgruppen fuer Tiering..."
     $tieringGroups = @(
         @{ Name = "T0-Admins";         Desc = "Tier 0 Administratoren (DC, PKI)";          Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
         @{ Name = "T1-Admins";         Desc = "Tier 1 Administratoren (SQL, Exchange)";    Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
@@ -340,70 +343,91 @@ function Step-Populate {
         } catch { Write-Log "Gruppe '$($g.Name)' nicht angelegt: $_" }
     }
 
-    # GPOs für Tiering-Struktur erstellen
-    Write-Log "Erstelle GPOs für Tiering-Enforcement..."
+    # Funktion zum Erhalten der SID einer Gruppe
+    function Get-GroupSID {
+        param([string]$GroupName)
+        try {
+            $group = Get-ADGroup -Identity $GroupName -Server $adServer -Properties SID -ErrorAction SilentlyContinue
+            if ($group) {
+                return $group.SID.Value
+            }
+        } catch { Write-Log "SID fuer Gruppe '$GroupName' nicht abgerufen: $_" }
+        return ""
+    }
+
+    # GPOs fuer Tiering-Struktur erstellen
+    Write-Log "Erstelle GPOs fuer Tiering-Enforcement..."
     
-    # GPO: T0-Admins dürfen sich nur an T0-Servern anmelden und sind dort Admin
+    # GPO: T0-Admins duerfen sich nur an T0-Servern anmelden und sind dort Admin
     $gpoT0 = "Tier0-Admin-Zugriff"
     if (-not (Get-GPO -Name $gpoT0 -ErrorAction SilentlyContinue)) {
         Write-Log "Erstelle GPO: $gpoT0"
         $newGPO = New-GPO -Name $gpoT0
         
-        # User Rights Assignment: Deny log on locally für alle außer T0-Admins
+        # User Rights Assignment: Deny log on locally fuer alle außer T0-Admins
         Set-GPRegistryValue -Name $gpoT0 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Policies\System" -ValueName "DenyLogOnLocally" -Type MultiString -Value @("T1-Admins", "T1-Server-Admins", "T2-Admins", "T2-Users", "T2-Client-Admins") -ErrorAction SilentlyContinue
         
-        # User Rights Assignment: Allow log on locally für T0-Admins
+        # User Rights Assignment: Allow log on locally fuer T0-Admins
         Set-GPRegistryValue -Name $gpoT0 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Policies\System" -ValueName "AllowLogOnLocally" -Type MultiString -Value @("T0-Admins") -ErrorAction SilentlyContinue
+        
+        # User Rights Assignment: Deny Remote Desktop Services fuer alle (Admins duerfen kein RDP nutzen)
+        Set-GPRegistryValue -Name $gpoT0 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Policies\System" -ValueName "DenyLogOnThroughRemoteDesktopServices" -Type MultiString -Value @("T0-Admins", "T1-Admins", "T2-Admins", "T2-Users", "T1-Server-Admins", "T2-Client-Admins") -ErrorAction SilentlyContinue
         
         # Restricted Groups: T0-Admins als Mitglieder der lokalen Administratoren
         Set-GPRegistryValue -Name $gpoT0 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Group Policy\RestrictedGroups\Administrators" -ValueName "Members" -Type MultiString -Value @("T0-Admins") -ErrorAction SilentlyContinue
         
-        # Verknüpfen mit T0-Servers OU
+        # Verknupfen mit T0-Servers OU
         New-GPLink -Name $gpoT0 -Target "OU=T0-Servers,OU=Tier0,OU=Unternehmen,$baseDN" -LinkEnabled Yes
-        Write-Log "GPO '$gpoT0' erstellt und mit T0-Servers verknüpft."
+        Write-Log "GPO '$gpoT0' erstellt und mit T0-Servers verknupft."
     }
 
-    # GPO: T1-Admins dürfen sich nur an T1-Servern anmelden und sind dort Admin
+    # GPO: T1-Admins duerfen sich nur an T1-Servern anmelden und sind dort Admin
     $gpoT1 = "Tier1-Admin-Zugriff"
     if (-not (Get-GPO -Name $gpoT1 -ErrorAction SilentlyContinue)) {
         Write-Log "Erstelle GPO: $gpoT1"
         $newGPO = New-GPO -Name $gpoT1
         
-        # User Rights Assignment: Deny log on locally für alle außer T1-Admins
+        # User Rights Assignment: Deny log on locally fuer alle außer T1-Admins
         Set-GPRegistryValue -Name $gpoT1 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Policies\System" -ValueName "DenyLogOnLocally" -Type MultiString -Value @("T0-Admins", "T0-Server-Admins", "T2-Admins", "T2-Users", "T2-Client-Admins") -ErrorAction SilentlyContinue
         
-        # User Rights Assignment: Allow log on locally für T1-Admins
+        # User Rights Assignment: Allow log on locally fuer T1-Admins
         Set-GPRegistryValue -Name $gpoT1 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Policies\System" -ValueName "AllowLogOnLocally" -Type MultiString -Value @("T1-Admins") -ErrorAction SilentlyContinue
+        
+        # User Rights Assignment: Deny Remote Desktop Services fuer alle (Admins duerfen kein RDP nutzen)
+        Set-GPRegistryValue -Name $gpoT1 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Policies\System" -ValueName "DenyLogOnThroughRemoteDesktopServices" -Type MultiString -Value @("T0-Admins", "T1-Admins", "T2-Admins", "T2-Users", "T0-Server-Admins", "T2-Client-Admins") -ErrorAction SilentlyContinue
         
         # Restricted Groups: T1-Admins als Mitglieder der lokalen Administratoren
         Set-GPRegistryValue -Name $gpoT1 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Group Policy\RestrictedGroups\Administrators" -ValueName "Members" -Type MultiString -Value @("T1-Admins") -ErrorAction SilentlyContinue
         
-        # Verknüpfen mit T1-Servers OU
+        # Verknupfen mit T1-Servers OU
         New-GPLink -Name $gpoT1 -Target "OU=T1-Servers,OU=Tier1,OU=Unternehmen,$baseDN" -LinkEnabled Yes
-        Write-Log "GPO '$gpoT1' erstellt und mit T1-Servers verknüpft."
+        Write-Log "GPO '$gpoT1' erstellt und mit T1-Servers verknupft."
     }
 
-    # GPO: T2-Admins/T2-Users dürfen sich nur an T2-Clients anmelden
+    # GPO: T2-Admins/T2-Users duerfen sich nur an T2-Clients anmelden
     $gpoT2 = "Tier2-Zugriff-Kontrolle"
     if (-not (Get-GPO -Name $gpoT2 -ErrorAction SilentlyContinue)) {
         Write-Log "Erstelle GPO: $gpoT2"
         $newGPO = New-GPO -Name $gpoT2
         
-        # User Rights Assignment: Deny log on locally für alle außer T2-Admins und T2-Users
+        # User Rights Assignment: Deny log on locally fuer alle außer T2-Admins und T2-Users
         Set-GPRegistryValue -Name $gpoT2 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Policies\System" -ValueName "DenyLogOnLocally" -Type MultiString -Value @("T0-Admins", "T0-Server-Admins", "T1-Admins", "T1-Server-Admins") -ErrorAction SilentlyContinue
         
-        # User Rights Assignment: Allow log on locally für T2-Admins und T2-Users
+        # User Rights Assignment: Allow log on locally fuer T2-Admins und T2-Users
         Set-GPRegistryValue -Name $gpoT2 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Policies\System" -ValueName "AllowLogOnLocally" -Type MultiString -Value @("T2-Admins", "T2-Users") -ErrorAction SilentlyContinue
+        
+        # User Rights Assignment: Deny Remote Desktop Services fuer alle (Admins duerfen kein RDP nutzen)
+        Set-GPRegistryValue -Name $gpoT2 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Policies\System" -ValueName "DenyLogOnThroughRemoteDesktopServices" -Type MultiString -Value @("T0-Admins", "T1-Admins", "T2-Admins", "T2-Users", "T0-Server-Admins", "T1-Server-Admins") -ErrorAction SilentlyContinue
         
         # Restricted Groups: T2-Admins als Mitglieder der lokalen Administratoren
         Set-GPRegistryValue -Name $gpoT2 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Group Policy\RestrictedGroups\Administrators" -ValueName "Members" -Type MultiString -Value @("T2-Admins") -ErrorAction SilentlyContinue
         
-        # Verknüpfen mit T2-Clients OU
+        # Verknupfen mit T2-Clients OU
         New-GPLink -Name $gpoT2 -Target "OU=T2-Clients,OU=Tier2,OU=Unternehmen,$baseDN" -LinkEnabled Yes
-        Write-Log "GPO '$gpoT2' erstellt und mit T2-Clients verknüpft."
+        Write-Log "GPO '$gpoT2' erstellt und mit T2-Clients verknupft."
     }
 
-    # GPO für Passwortrichtlinie
+    # GPO fuer Passwortrichtlinie
     try {
         $gpoName = "Domaenen-Passwortrichtlinie"
         if (-not (Get-GPO -Name $gpoName -ErrorAction SilentlyContinue)) {
@@ -417,18 +441,6 @@ function Step-Populate {
     Write-Log "Tiering-Struktur und GPOs erfolgreich erstellt."
     Save-Progress -Step "step2finish"
     Invoke-Reboot -NextStepName "Abschluss"
-}
-# --- Schritt 3: Aufraeumen -------------------------------------------------
-function Step-Cleanup {
-    Write-Log "Schritt 3: Aufraeumen - Domaene ist fertig."
-    Remove-ScheduledTask
-    Remove-Item -Path $progressFile -Force -ErrorAction SilentlyContinue
-    # Letzte GPO-Verifikation nach Abschluss
-    try {
-        gpupdate /force 2>$null | Out-Null
-        Write-Log "Gruppenrichtlinien aktualisiert."
-    } catch { }
-    Write-Log "Skript abgeschlossen. Domain Controller $NetBiosName ($DomainName) ist einsatzbereit."
 }
 
 # --- Schritt 1b: AD-Promotion (Rolleninstallation nach Neustart-Pruefung) ---
@@ -492,6 +504,19 @@ function Step-PromoteCheck {
 
     Save-Progress -Step "step1finish"
     Invoke-Reboot -NextStepName "Haertung als Domain Controller"
+}
+
+# --- Schritt 3: Aufraeumen -------------------------------------------------
+function Step-Cleanup {
+    Write-Log "Schritt 3: Aufraeumen - Domaene ist fertig."
+    Remove-ScheduledTask
+    Remove-Item -Path $progressFile -Force -ErrorAction SilentlyContinue
+    # Letzte GPO-Verifikation nach Abschluss
+    try {
+        gpupdate /force 2>$null | Out-Null
+        Write-Log "Gruppenrichtlinien aktualisiert."
+    } catch { }
+    Write-Log "Skript abgeschlossen. Domain Controller $NetBiosName ($DomainName) ist einsatzbereit."
 }
 
 # --- Hauptsteuerung --------------------------------------------------------
