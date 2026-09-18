@@ -291,12 +291,6 @@ function Step-Optimize {
         Write-Log "SMB1 deaktiviert."
     } catch { Write-Log "SMB1 Deaktivierung fehlgeschlagen: $_" }
 
-    # Windows Defender Echtzeitschutz aktiv lassen, aber Ausschluesse fuer AD
-    try {
-        Add-MpPreference -ExclusionPath "C:\Windows\NTDS","C:\Windows\SYSVOL","C:\Windows\System32\ntds.dit" -ErrorAction SilentlyContinue
-        Write-Log "Defender-Ausschluesse fuer AD-Verzeichnisse gesetzt."
-    } catch { Write-Log "Defender-Ausschluesse nicht gesetzt: $_" }
-
     # Temp bereinigen
     Get-ChildItem "C:\Windows\Temp","$env:TEMP" -ErrorAction SilentlyContinue |
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue

@@ -354,6 +354,12 @@ function Step-HardenDC {
         throw $_
     }
 
+    # Windows Defender Echtzeitschutz aktiv lassen, aber Ausschluesse fuer AD-Verzeichnisse (DC-spezifisch)
+    try {
+        Add-MpPreference -ExclusionPath "C:\Windows\NTDS","C:\Windows\SYSVOL","C:\Windows\System32\ntds.dit" -ErrorAction SilentlyContinue
+        Write-Log "Defender-Ausschluesse fuer AD-Verzeichnisse gesetzt."
+    } catch { Write-Log "Defender-Ausschluesse nicht gesetzt: $_" }
+
     Save-Progress -Step "step1hardenfinish"
     Invoke-Reboot -NextStepName "Musterdaten einspielen"
 }

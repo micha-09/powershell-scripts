@@ -32,7 +32,6 @@ Dieses Repository enthaelt PowerShell-Skripte zur Automatisierung der Bereitstel
     - `XboxGipSvc` (Xbox-Dienste – Unnoetig auf Servern)
     - `XblAuthManager` (Xbox-Authentifizierung – Unnoetig auf Servern)
   - SMB1 deaktivieren (Sicherheitsrisiko)
-  - Windows Defender Ausschluesse fuer AD-Verzeichnisse
   - Temp-Bereinigung
 
 - **Schritt 3: Aufraeumen**
@@ -71,6 +70,7 @@ Das Administrator-Konto (SID-500) wird **zu Beginn** mit einem zufaelligen Kennw
 
 - **Schritt 2: Domain Controller haerten**
   - OSConfig DC-Security-Baseline anwenden (Windows Server 2025)
+  - Windows Defender Ausschluesse fuer AD-Verzeichnisse (NTDS, SYSVOL, ntds.dit) – erst hier, da DC-spezifisch
 
 - **Schritt 3: Domaene mit Tiering-Struktur befuellen**
   - **Tiering-Struktur OUs** (alle OUs direkt am Domain-Root):
