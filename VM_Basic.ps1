@@ -46,7 +46,7 @@ param (
     [string]$DefaultGateway   = "192.168.10.1",
     [string]$DnsServer        = "127.0.0.1",
     [string]$LocalAdminName   = "LokalAdmin",
-    [string]$LocalAdminPwd    = "P@ssw0rd!2025"
+    [string]$LocalAdminPwd    = "Fenster2020!"
 )
 
 $ErrorActionPreference = "Stop"
