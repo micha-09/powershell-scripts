@@ -409,6 +409,18 @@ function Step-Populate {
         } catch { Write-Log "Gruppe '$($g.Name)' nicht angelegt: $_" }
     }
 
+    # Administrator (SID-500) in T0-Admins aufnehmen, damit die GPO-Logon-Rechte ihn nicht aussperren
+    try {
+        $domainSid = (Get-ADDomain -Server $adServer).DomainSID.Value
+        $admin = Get-ADUser -Identity "$domainSid-500" -Server $adServer -ErrorAction SilentlyContinue
+        if ($admin) {
+            Add-ADGroupMember -Identity "T0-Admins" -Members $admin.SamAccountName -Server $adServer -ErrorAction Stop
+            Write-Log "Administrator (SID-500) in Gruppe 'T0-Admins' aufgenommen."
+        } else {
+            Write-Log "Administrator (SID-500) nicht gefunden - nicht in 'T0-Admins' aufgenommen."
+        }
+    } catch { Write-Log "Administrator konnte nicht in 'T0-Admins' aufgenommen werden: $_" }
+
     # Funktion zum Erhalten der SID einer Gruppe
     function Get-GroupSID {
         param([string]$GroupName)

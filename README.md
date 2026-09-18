@@ -98,6 +98,7 @@ Das Administrator-Konto (SID-500) wird **zu Beginn** mit einem zufaelligen Kennw
     - T1-Admins (Tier 1 Administratoren)
     - T2-Admins (Tier 2 Administratoren)
     - T2-Users (Tier 2 Benutzer)
+  - **Administrator (SID-500) in T0-Admins aufnehmen** (verhindert, dass ihn die Logon-Restriktionen aussperren)
   - **GPOs mit Zugriffsbeschraenkungen:**
     - **Tier0-Admin-Zugriff:**
       - T0-Admins duerfen sich nur an T0-Servern anmelden
