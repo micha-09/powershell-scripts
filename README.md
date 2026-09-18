@@ -101,8 +101,9 @@ Das Administrator-Konto (SID-500) wird **zu Beginn** mit einem zufaelligen Kennw
   - **Administrator (SID-500) in T0-Admins aufnehmen** (verhindert, dass ihn die Logon-Restriktionen aussperren)
   - **GPOs mit Zugriffsbeschraenkungen:**
     - **Tier0-Admin-Zugriff:**
-      - T0-Admins duerfen sich nur an T0-Servern anmelden
+      - T0-Admins duerfen sich nur an T0-Servern (inkl. Domain Controllers) anmelden
       - T0-Admins sind lokale Admins auf T0-Servern
+      - GPO ist an `OU=T0-Servers` **und** an die `Domain Controllers` OU verknuepft
       - Alle Admins duerfen kein RDP nutzen
     - **Tier1-Admin-Zugriff:**
       - T1-Admins duerfen sich nur an T1-Servern anmelden

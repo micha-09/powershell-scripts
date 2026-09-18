@@ -469,9 +469,11 @@ function Step-Populate {
         # Restricted Groups: T0-Admins als Mitglieder der lokalen Administratoren
         Set-GPRegistryValue -Name $gpoT0 -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Group Policy\RestrictedGroups\Administrators" -ValueName "Members" -Type MultiString -Value @("T0-Admins") -ErrorAction SilentlyContinue
         
-        # Verknupfen mit T0-Servers OU
+        # Verknuepfen mit T0-Servers OU
         New-GPLink -Name $gpoT0 -Target "OU=T0-Servers,OU=Tier0,$baseDN" -LinkEnabled Yes
-        Write-Log "GPO '$gpoT0' erstellt und mit T0-Servers verknupft."
+        # DCs sind Tier-0-Systeme: GPO zusaetzlich an die Domain Controllers OU haengen
+        New-GPLink -Name $gpoT0 -Target "OU=Domain Controllers,$baseDN" -LinkEnabled Yes
+        Write-Log "GPO '$gpoT0' erstellt und mit T0-Servers und Domain Controllers verknupft."
     }
 
     # GPO: T1-Admins duerfen sich nur an T1-Servern anmelden und sind dort Admin
