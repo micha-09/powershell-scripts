@@ -74,19 +74,22 @@ Das Administrator-Konto (SID-500) wird **zu Beginn** mit einem zufaelligen Kennw
   - OSConfig DC-Security-Baseline anwenden (Windows Server 2025)
 
 - **Schritt 3: Domaene mit Tiering-Struktur befuellen**
-  - **Tiering-Struktur OUs:**
+  - **Tiering-Struktur OUs** (alle OUs direkt am Domain-Root):
     ```
-    MeinUnternehmen (Root-OU)
+    Domain Root (DC=dev,DC=lab)
     ├── Tier0
     │   ├── T0-Admins (Benutzer)
     │   └── T0-Servers (DCs, PKI)
     ├── Tier1
     │   ├── T1-Admins (Server-Admins, Helpdesk Level 2)
     │   └── T1-Servers (SQL, Exchange, etc.)
-    └── Tier2
-        ├── T2-Users (Normale Mitarbeiter)
-        ├── T2-Admins (Helpdesk Level 1)
-        └── T2-Clients (Windows Laptops/PCs)
+    ├── Tier2
+    │   ├── T2-Users (Normale Mitarbeiter)
+    │   ├── T2-Admins (Helpdesk Level 1)
+    │   └── T2-Clients (Windows Laptops/PCs)
+    ├── Gruppen
+    ├── ServiceAccounts
+    └── Benutzer
     ```
   - **Sicherheitsgruppen erstellen:**
     - T0-Admins (Tier 0 Administratoren)
@@ -229,6 +232,8 @@ Die folgende Liste von Diensten wird in `VM_Basic.ps1` deaktiviert, um Sicherhei
 ### [Latest](https://github.com/micha-09/powershell-scripts/commit/main)
 - **Create_AD.ps1:**
   - **Neue Sicherheitsmassnahme:** Admin-Konto (SID-500) wird waehrend des Setups mit zufaelligem Kennwort gesperrt, erst am Ende wird das gewuenschte Kennwort gesetzt (`-AdminPassword` Parameter)
+  - **OU-Struktur vereinfacht:** Root-OU 'Unternehmen' entfernt, alle OUs haengen direkt am Domain-Root
+  - **Splatting-Refactoring:** `Install-ADDSForest` nutzt jetzt Parameter-Hashtables statt Backtick-Notation (robuster, lesbarer)
   - Korrigierte Neustart-Logik: Maximal 1 Neustart vor der Rolleninstallation
   - `Step-PromoteCheck` fuehrt direkt die Rolleninstallation aus (keine Endlosschleife mehr)
   - Robustere Pruefung auf ausstehende Neustarts (CBS, Windows Update, DISM, etc.)
