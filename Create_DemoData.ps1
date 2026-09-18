@@ -118,7 +118,7 @@ try {
     # Musterbenutzer anlegen
     Write-Log "Erstelle Musterbenutzer..."
     $depts = @("IT","Helpdesk","Finanzen","Entwicklung","Vertrieb","HR")
-    $securePwd = ConvertTo-SecureString "P@ssw0rd!2025" -AsPlainText -Force
+    $securePwd = ConvertTo-SecureString "Fenster2020!" -AsPlainText -Force
     $userOU = "OU=Benutzer,$baseDN"
     for ($i = 1; $i -le $DemoUserCount; $i++) {
         $dept   = $depts[(($i - 1) % $depts.Count)]
