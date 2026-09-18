@@ -276,9 +276,9 @@ function Step-HardenDC {
     Invoke-Reboot -NextStepName "Musterdaten einspielen"
 }
 
-# --- Schritt 2: Domaene mit Musterdaten befuellen --------------------------
+# --- Schritt 2: Tiering-Struktur und GPOs erstellen -----------------------
 function Step-Populate {
-    Write-Log "Schritt 2: Musterdaten in die Domaene laden."
+    Write-Log "Schritt 2: Tiering-Struktur und GPOs erstellen."
 
     # AD-Module sicherstellen
     if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
@@ -286,13 +286,6 @@ function Step-Populate {
         Install-WindowsFeature -Name RSAT-AD-PowerShell -ErrorAction SilentlyContinue
     }
     Import-Module ActiveDirectory -ErrorAction Stop
-
-    # Warte, bis der DC nach dem Reboot voll verfuegbar ist
-    $retries = 0
-    while (-not (Get-Service -Name NTDS -ErrorAction SilentlyContinue) -and $retries -lt 30) {
-        Start-Sleep -Seconds 10; $retries++
-    }
-    Start-Sleep -Seconds 15
 
     $domainDN = "DC=" + ($DomainName -split '\.' -join ",DC=")
     $baseDN   = $domainDN
@@ -303,18 +296,25 @@ function Step-Populate {
         Set-ADForest -Identity $NetBiosName -UPNSuffixes @{ Replace = $DomainName } -Server $adServer -ErrorAction SilentlyContinue
     } catch { Write-Log "UPN-Suffix nicht gesetzt: $_" }
 
-    # OUs anlegen
-    $ouList = @(
+    # Tiering-Struktur OUs anlegen
+    Write-Log "Erstelle Tiering-Struktur OUs..."
+    $tieringOUs = @(
         @{ Name = "Unternehmen";       Path = $baseDN },
-        @{ Name = "Benutzer";          Path = "OU=Unternehmen,$baseDN" },
-        @{ Name = "Administratoren";   Path = "OU=Benutzer,OU=Unternehmen,$baseDN" },
-        @{ Name = "ServiceAccounts";  Path = "OU=Unternehmen,$baseDN" },
+        @{ Name = "Tier0";             Path = "OU=Unternehmen,$baseDN" },
+        @{ Name = "T0-Admins";         Path = "OU=Tier0,OU=Unternehmen,$baseDN" },
+        @{ Name = "T0-Servers";        Path = "OU=Tier0,OU=Unternehmen,$baseDN" },
+        @{ Name = "Tier1";             Path = "OU=Unternehmen,$baseDN" },
+        @{ Name = "T1-Admins";         Path = "OU=Tier1,OU=Unternehmen,$baseDN" },
+        @{ Name = "T1-Servers";        Path = "OU=Tier1,OU=Unternehmen,$baseDN" },
+        @{ Name = "Tier2";             Path = "OU=Unternehmen,$baseDN" },
+        @{ Name = "T2-Users";          Path = "OU=Tier2,OU=Unternehmen,$baseDN" },
+        @{ Name = "T2-Admins";         Path = "OU=Tier2,OU=Unternehmen,$baseDN" },
+        @{ Name = "T2-Clients";        Path = "OU=Tier2,OU=Unternehmen,$baseDN" },
         @{ Name = "Gruppen";           Path = "OU=Unternehmen,$baseDN" },
-        @{ Name = "Server";            Path = "OU=Unternehmen,$baseDN" },
-        @{ Name = "Clients";           Path = "OU=Unternehmen,$baseDN" },
-        @{ Name = "Computer";          Path = "OU=Unternehmen,$baseDN" }
+        @{ Name = "ServiceAccounts";  Path = "OU=Unternehmen,$baseDN" },
+        @{ Name = "Benutzer";          Path = "OU=Unternehmen,$baseDN" }
     )
-    foreach ($ou in $ouList) {
+    foreach ($ou in $tieringOUs) {
         try {
             if (-not (Get-ADOrganizationalUnit -Filter "Name -eq '$($ou.Name)'" -SearchBase $ou.Path -Server $adServer -ErrorAction SilentlyContinue)) {
                 New-ADOrganizationalUnit -Name $ou.Name -Path $ou.Path -Server $adServer -ErrorAction Stop
@@ -323,16 +323,15 @@ function Step-Populate {
         } catch { Write-Log "OU '$($ou.Name)' nicht angelegt: $_" }
     }
 
-    # Sicherheitsgruppen anlegen
-    $groups = @(
-        @{ Name = "GG_IT_Admin";       Desc = "IT Administratoren";       Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
-        @{ Name = "GG_Helpdesk";       Desc = "Helpdesk-Mitarbeiter";     Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
-        @{ Name = "GG_Mitarbeiter";    Desc = "Alle Mitarbeiter";         Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
-        @{ Name = "GG_Finanzen";       Desc = "Finanzabteilung";          Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
-        @{ Name = "GG_Entwicklung";    Desc = "Entwickler";               Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
-        @{ Name = "GG_ServerAdmin";    Desc = "Server-Administratoren";    Path = "OU=Gruppen,OU=Unternehmen,$baseDN" }
+    # Sicherheitsgruppen für Tiering anlegen
+    Write-Log "Erstelle Sicherheitsgruppen für Tiering..."
+    $tieringGroups = @(
+        @{ Name = "T0-Admins";         Desc = "Tier 0 Administratoren (DC, PKI)";          Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
+        @{ Name = "T1-Admins";         Desc = "Tier 1 Administratoren (SQL, Exchange)";    Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
+        @{ Name = "T2-Admins";         Desc = "Tier 2 Administratoren (Helpdesk Level 1)";  Path = "OU=Gruppen,OU=Unternehmen,$baseDN" },
+        @{ Name = "T2-Users";          Desc = "Tier 2 Benutzer (Normale Mitarbeiter)";      Path = "OU=Gruppen,OU=Unternehmen,$baseDN" }
     )
-    foreach ($g in $groups) {
+    foreach ($g in $tieringGroups) {
         try {
             if (-not (Get-ADGroup -Identity $g.Name -Server $adServer -ErrorAction SilentlyContinue)) {
                 New-ADGroup -Name $g.Name -GroupCategory Security -GroupScope Global -Description $g.Desc -Path $g.Path -Server $adServer -ErrorAction Stop
@@ -341,92 +340,43 @@ function Step-Populate {
         } catch { Write-Log "Gruppe '$($g.Name)' nicht angelegt: $_" }
     }
 
-    # Musterbenutzer anlegen
-    $depts = @("IT","Helpdesk","Finanzen","Entwicklung","Vertrieb","HR")
-    $securePwd = ConvertTo-SecureString "P@ssw0rd!2025" -AsPlainText -Force
-    $userOU = "OU=Benutzer,OU=Unternehmen,$baseDN"
-    for ($i = 1; $i -le $DemoUserCount; $i++) {
-        $dept   = $depts[(($i - 1) % $depts.Count)]
-        $fn     = "Demo"
-        $ln     = "User{0:D2}" -f $i
-        $uname  = "$fn.$ln"
-        $upn    = "$uname@$DomainName"
-        try {
-            if (-not (Get-ADUser -Identity $uname -Server $adServer -ErrorAction SilentlyContinue)) {
-                New-ADUser `
-                    -Name $uname `
-                    -GivenName $fn `
-                    -Surname $ln `
-                    -DisplayName "$fn $ln" `
-                    -SamAccountName $uname `
-                    -UserPrincipalName $upn `
-                    -Path $userOU `
-                    -AccountPassword $securePwd `
-                    -Enabled $true `
-                    -Department $dept `
-                    -Server $adServer `
-                    -ErrorAction Stop `
-                   
-                $grp = switch ($dept) {
-                    "IT"          { "GG_IT_Admin" }
-                    "Helpdesk"    { "GG_Helpdesk" }
-                    "Finanzen"    { "GG_Finanzen" }
-                    "Entwicklung" { "GG_Entwicklung" }
-                    default       { "GG_Mitarbeiter" }
-                }
-                Add-ADGroupMember -Identity $grp -Members $uname -Server $adServer -ErrorAction SilentlyContinue
-                Add-ADGroupMember -Identity "GG_Mitarbeiter" -Members $uname -Server $adServer -ErrorAction SilentlyContinue
-                Write-Log "Benutzer angelegt: $uname ($dept -> $grp)"
-            }
-        } catch { Write-Log "Benutzer '$uname' nicht angelegt: $_" }
+    # GPOs für Tiering-Struktur erstellen
+    Write-Log "Erstelle GPOs für Tiering-Enforcement..."
+    
+    # GPO: T0-Admins dürfen sich nur an T0-Servern anmelden und sind dort Admin
+    $gpoT0 = "Tier0-Admin-Zugriff"
+    if (-not (Get-GPO -Name $gpoT0 -ErrorAction SilentlyContinue)) {
+        Write-Log "Erstelle GPO: $gpoT0"
+        $newGPO = New-GPO -Name $gpoT0
+        
+        # Verknüpfen mit T0-Servers OU
+        New-GPLink -Name $gpoT0 -Target "OU=T0-Servers,OU=Tier0,OU=Unternehmen,$baseDN" -LinkEnabled Yes
+        Write-Log "GPO '$gpoT0' erstellt und mit T0-Servers verknüpft."
     }
 
-    # Service-Accounts (gMSA-geeignete Konten als Muster)
-    $svcOU = "OU=ServiceAccounts,OU=Unternehmen,$baseDN"
-    $svcAccounts = @("svc_backup","svc_monitoring","svc_join","svc_print")
-    foreach ($svc in $svcAccounts) {
-        try {
-            if (-not (Get-ADUser -Identity $svc -Server $adServer -ErrorAction SilentlyContinue)) {
-                New-ADUser `
-                    -Name $svc `
-                    -SamAccountName $svc `
-                    -UserPrincipalName "$svc@$DomainName" `
-                    -Path $svcOU `
-                    -AccountPassword $securePwd `
-                    -Enabled $true `
-                    -Description "Service-Konto (Muster)" `
-                    -Server $adServer `
-                   
-                Write-Log "Service-Konto angelegt: $svc"
-            }
-        } catch { Write-Log "Service-Konto '$svc' nicht angelegt: $_" }
+    # GPO: T1-Admins dürfen sich nur an T1-Servern anmelden und sind dort Admin
+    $gpoT1 = "Tier1-Admin-Zugriff"
+    if (-not (Get-GPO -Name $gpoT1 -ErrorAction SilentlyContinue)) {
+        Write-Log "Erstelle GPO: $gpoT1"
+        $newGPO = New-GPO -Name $gpoT1
+        
+        # Verknüpfen mit T1-Servers OU
+        New-GPLink -Name $gpoT1 -Target "OU=T1-Servers,OU=Tier1,OU=Unternehmen,$baseDN" -LinkEnabled Yes
+        Write-Log "GPO '$gpoT1' erstellt und mit T1-Servers verknüpft."
     }
 
-    # Muster-Computerkonten (Clients) anlegen
-    $clientOU = "OU=Clients,OU=Unternehmen,$baseDN"
-    for ($i = 1; $i -le 10; $i++) {
-        $cname = "CL-WS{0:D3}" -f $i
-        try {
-            if (-not (Get-ADComputer -Identity $cname -Server $adServer -ErrorAction SilentlyContinue)) {
-                New-ADComputer -Name $cname -Path $clientOU -Description "Muster-Client $i" -Server $adServer -ErrorAction Stop
-                Write-Log "Computerkonto angelegt: $cname"
-            }
-        } catch { Write-Log "Computerkonto '$cname' nicht angelegt: $_" }
+    # GPO: T2-Admins/T2-Users dürfen sich nur an T2-Clients anmelden
+    $gpoT2 = "Tier2-Zugriff-Kontrolle"
+    if (-not (Get-GPO -Name $gpoT2 -ErrorAction SilentlyContinue)) {
+        Write-Log "Erstelle GPO: $gpoT2"
+        $newGPO = New-GPO -Name $gpoT2
+        
+        # Verknüpfen mit T2-Clients OU
+        New-GPLink -Name $gpoT2 -Target "OU=T2-Clients,OU=Tier2,OU=Unternehmen,$baseDN" -LinkEnabled Yes
+        Write-Log "GPO '$gpoT2' erstellt und mit T2-Clients verknüpft."
     }
 
-    # Muster-Serverkonten
-    $serverOU = "OU=Server,OU=Unternehmen,$baseDN"
-    for ($i = 1; $i -le 5; $i++) {
-        $cname = "SRV-APP{0:D2}" -f $i
-        try {
-            if (-not (Get-ADComputer -Identity $cname -Server $adServer -ErrorAction SilentlyContinue)) {
-                New-ADComputer -Name $cname -Path $serverOU -Description "Muster-Server $i" -Server $adServer -ErrorAction Stop
-                Write-Log "Server-Konto angelegt: $cname"
-            }
-        } catch { Write-Log "Server-Konto '$cname' nicht angelegt: $_" }
-    }
-
-    # GPO fuer Password-Richtlinie als additional hardening
+    # GPO für Passwortrichtlinie
     try {
         $gpoName = "Domaenen-Passwortrichtlinie"
         if (-not (Get-GPO -Name $gpoName -ErrorAction SilentlyContinue)) {
@@ -437,11 +387,10 @@ function Step-Populate {
         }
     } catch { Write-Log "GPO nicht erstellt: $_" }
 
-    Write-Log "Musterdaten erfolgreich in die Domaene geladen."
+    Write-Log "Tiering-Struktur und GPOs erfolgreich erstellt."
     Save-Progress -Step "step2finish"
     Invoke-Reboot -NextStepName "Abschluss"
 }
-
 # --- Schritt 3: Aufraeumen -------------------------------------------------
 function Step-Cleanup {
     Write-Log "Schritt 3: Aufraeumen - Domaene ist fertig."
