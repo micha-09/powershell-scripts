@@ -286,15 +286,17 @@ function Step-Promote {
     } else {
         $secureDsrm = ConvertTo-SecureString $DsrmPassword -AsPlainText -Force
         Write-Log "Erstelle neue Gesamtstruktur '$DomainName' (NetBIOS $NetBiosName)..."
-        Install-ADDSForest `\
-            -DomainName $DomainName `\
-            -DomainNetbiosName $NetBiosName `\
-            -SafeModeAdministratorPassword $secureDsrm `\
-            -InstallDNS `\
-            -NoRebootOnCompletion `\
-            -Force `\
-            -ErrorAction Stop `\
-           
+        $Parameters = @{
+            DomainName                      = $DomainName
+            DomainNetbiosName               = $NetBiosName
+            SafeModeAdministratorPassword   = $secureDsrm
+            InstallDNS                      = $true
+            NoRebootOnCompletion            = $true
+            Force                           = $true
+            ErrorAction                     = 'Stop'
+        }
+        Install-ADDSForest @Parameters
+        
         Write-Log "Neue Gesamtstruktur erstellt."
     }
     
@@ -545,14 +547,16 @@ function Step-PromoteCheck {
     } else {
         $secureDsrm = ConvertTo-SecureString $DsrmPassword -AsPlainText -Force
         Write-Log "Erstelle neue Gesamtstruktur '$DomainName' (NetBIOS $NetBiosName)..."
-        Install-ADDSForest `\
-            -DomainName $DomainName `\
-            -DomainNetbiosName $NetBiosName `\
-            -SafeModeAdministratorPassword $secureDsrm `\
-            -InstallDNS `\
-            -NoRebootOnCompletion `\
-            -Force `\
-            -ErrorAction Stop `\
+        $Parameters = @{
+            DomainName                      = $DomainName
+            DomainNetbiosName               = $NetBiosName
+            SafeModeAdministratorPassword   = $secureDsrm
+            InstallDNS                      = $true
+            NoRebootOnCompletion            = $true
+            Force                           = $true
+            ErrorAction                     = 'Stop'
+        }
+        Install-ADDSForest @Parameters
            
         Write-Log "Neue Gesamtstruktur erstellt."
     }
