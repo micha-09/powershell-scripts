@@ -33,9 +33,11 @@ Dieses Repository enthaelt PowerShell-Skripte zur Automatisierung der Bereitstel
   - SMB1 deaktivieren (Sicherheitsrisiko)
   - Windows Defender Ausschluesse fuer AD-Verzeichnisse
   - Temp-Bereinigung
-  - Lokalen Administrator umbenennen und Passwort setzen
+  - Lokalen Administrator umbenennen
+  - **Sicherheitsmassnahme: Zufaelliges Admin-Passwort setzen** (verhindert Anmeldung waehrend Setup)
 
 - **Schritt 3: Aufraeumen**
+  - **Admin-Passwort auf gewuenschten Wert setzen** (letzter Schritt)
   - Plante Aufgabe entfernen
   - Fortschrittsdatei loeschen
 
@@ -101,6 +103,7 @@ Dieses Repository enthaelt PowerShell-Skripte zur Automatisierung der Bereitstel
       - Alle Admins duerfen kein RDP nutzen
 
 - **Schritt 4: Aufraeumen**
+  - **Admin-Passwort auf gewuenschten Wert setzen** (letzter Schritt)
   - Plante Aufgabe entfernen
   - Gruppenrichtlinien aktualisieren
 
