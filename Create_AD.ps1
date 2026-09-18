@@ -45,7 +45,7 @@ param (
     [string]$DomainName       = "dev.lab",
     [string]$NetBiosName      = "dev",
     [string]$DsrmPassword     = "Fenster2020!",
-    [string]$AdminPassword    = "P@ssw0rd!2025"
+    [string]$AdminPassword    = "Fenster2020!"
 )
 
 $ErrorActionPreference = "Stop"
