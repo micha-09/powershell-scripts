@@ -46,6 +46,7 @@ Dieses Repository enthaelt PowerShell-Skripte zur Automatisierung der Bereitstel
 
 #### Sicherheitsmassnahme:
 Das Administrator-Konto (SID-500) wird **zu Beginn** mit einem zufaelligen Kennwort gesichert, damit **waehrend des gesamten Setups keine Anmeldung am DC moeglich** ist. Erst im letzten Schritt (`Step-Cleanup`) wird das gewuenschte Kennwort gesetzt (Parameter `-AdminPassword`).
+**Tritt waehrend des Setups ein Fehler / eine Exception auf**, wird das gewuenschte Kennwort automatisch sofort gesetzt, damit der Server nicht mit dem zufaelligen Kennwort gesperrt bleibt.
 
 #### Funktionen:
 - **Schritt 1: Domain Controller hochstufen**
@@ -234,6 +235,8 @@ Die folgende Liste von Diensten wird in `VM_Basic.ps1` deaktiviert, um Sicherhei
 ## 📜 Changelog
 
 ### [Latest](https://github.com/micha-09/powershell-scripts/commit/main)
+- **VM_Basic.ps1 & Create_AD.ps1:**
+  - **Fehler-Handling:** Bei einem Fehler / einer Exception waehrend des Setups wird das gewuenschte Admin-Kennwort automatisch sofort gesetzt, damit der Server nicht mit dem zufaelligen Kennwort gesperrt bleibt
 - **Create_AD.ps1:**
   - **Neue Sicherheitsmassnahme:** Admin-Konto (SID-500) wird waehrend des Setups mit zufaelligem Kennwort gesperrt, erst am Ende wird das gewuenschte Kennwort gesetzt (`-AdminPassword` Parameter)
   - **OU-Struktur angepasst:** Jeder Tier erhaelt eigene 'Service Accounts'- und 'Gruppen'-OUs (T0/T1/T2); globale OUs (Gruppen, ServiceAccounts, Benutzer) entfernt; Tiering-Gruppen liegen in den jeweiligen T*-Gruppen-OUs

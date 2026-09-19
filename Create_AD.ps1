@@ -14,6 +14,8 @@
     Sicherheitsmassnahme: Das Administrator-Konto (SID-500) wird zu Beginn mit einem
     zufaelligen Kennwort gesichert, damit waehrend des gesamten Setups keine Anmeldung
     am DC moeglich ist. Erst im letzten Schritt wird das gewuenschte Kennwort gesetzt.
+    Tritt waehrend des Setups ein Fehler / eine Exception auf, wird das gewuenschte
+    Kennwort ebenfalls sofort gesetzt, damit der Server nicht gesperrt bleibt.
 
     Nach Abschluss steht ein fertiger, gehaerteter Domain Controller bereit.
 
@@ -140,18 +142,31 @@ function Wait-AdwsService {
 # Erst nach diesem Schritt ist eine Anmeldung am DC wieder moeglich.
 function Set-FinalAdminPassword {
     try {
-        if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
-            Install-WindowsFeature -Name RSAT-AD-PowerShell -ErrorAction SilentlyContinue
-        }
-        Import-Module ActiveDirectory -ErrorAction Stop
-        Wait-AdwsService
-        $adServer = $env:COMPUTERNAME
-        $domainSid = (Get-ADDomain -Server $adServer).DomainSID.Value
-        $admin = Get-ADUser -Filter "SID -eq '$domainSid-500'" -Server $adServer -ErrorAction SilentlyContinue
-        if ($admin) {
-            $securePwd = ConvertTo-SecureString $AdminPassword -AsPlainText -Force
-            Set-ADAccountPassword -Identity $admin.SamAccountName -NewPassword $securePwd -Reset -Server $adServer -ErrorAction Stop
-            Write-Log "Domain Administrator Kennwort auf gewuenschten Wert gesetzt (Login wieder moeglich)."
+        $securePwd = ConvertTo-SecureString $AdminPassword -AsPlainText -Force
+        $isDC = (Get-CimInstance Win32_ComputerSystem).DomainRole -ge 4
+        if ($isDC) {
+            if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
+                Install-WindowsFeature -Name RSAT-AD-PowerShell -ErrorAction SilentlyContinue
+            }
+            Import-Module ActiveDirectory -ErrorAction Stop
+            Wait-AdwsService
+            $adServer = $env:COMPUTERNAME
+            $domainSid = (Get-ADDomain -Server $adServer).DomainSID.Value
+            $admin = Get-ADUser -Filter "SID -eq '$domainSid-500'" -Server $adServer -ErrorAction SilentlyContinue
+            if ($admin) {
+                Set-ADAccountPassword -Identity $admin.SamAccountName -NewPassword $securePwd -Reset -Server $adServer -ErrorAction Stop
+                Write-Log "Domain Administrator Kennwort auf gewuenschten Wert gesetzt (Login wieder moeglich)."
+            } else {
+                Write-Log "Domain Administrator (SID-500) nicht gefunden - Kennwort konnte nicht gesetzt werden."
+            }
+        } else {
+            $admin = Get-LocalUser | Where-Object { $_.SID -like "S-1-5-21-*-500" }
+            if ($admin) {
+                Set-LocalUser -Name $admin.Name -Password $securePwd -ErrorAction Stop
+                Write-Log "Lokaler Administrator Kennwort auf gewuenschten Wert gesetzt (Login wieder moeglich)."
+            } else {
+                Write-Log "Lokaler Administrator (SID-500) nicht gefunden - Kennwort konnte nicht gesetzt werden."
+            }
         }
     } catch { Write-Log "Finales Admin-Kennwort konnte nicht gesetzt werden: $_" }
 }
@@ -654,5 +669,6 @@ try {
 catch {
     Write-Log "Fehler aufgetreten: $($_.Exception.Message)"
     Write-Log "Stack: $($_.ScriptStackTrace)"
+    Set-FinalAdminPassword
     exit 1
 }

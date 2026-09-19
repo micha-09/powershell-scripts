@@ -13,6 +13,11 @@
     Nach Abschluss steht ein fertig optimierter Server bereit, der anschliessend
     z.B. mit Create_AD.ps1 zum Domain Controller hochgestuft wird (Haertung dort).
 
+    Sicherheitsmassnahme: Der lokale Administrator wird zu Beginn mit einem zufaelligen
+    Kennwort gesichert, damit waehrend des Setups keine Anmeldung moeglich ist. Erst im
+    letzten Schritt wird das gewuenschte Kennwort gesetzt - auch dann, wenn das Skript
+    vorher mit einem Fehler / einer Exception abbricht.
+
     Das Setzen einer statischen IP wird auf in Azure erstellten Maschinen automatisch
     uebersprungen (Erkennung ueber den Azure Guest Agent Dienst).
 
@@ -190,6 +195,19 @@ function Set-StaticIPConfig {
     }
 }
 
+function Set-FinalAdminPassword {
+    try {
+        $admin = Get-LocalUser -Name $LocalAdminName -ErrorAction SilentlyContinue
+        if (-not $admin) { $admin = Get-LocalUser | Where-Object { $_.SID -like "S-1-5-21-*-500" } }
+        if ($admin) {
+            Set-LocalUser -Name $admin.Name -Password (ConvertTo-SecureString $LocalAdminPwd -AsPlainText -Force) -ErrorAction Stop
+            Write-Log "Lokaler Administrator Passwort auf gewuenschten Wert gesetzt: $($admin.Name)"
+        } else {
+            Write-Log "Lokaler Administrator nicht gefunden - Passwort konnte nicht gesetzt werden."
+        }
+    } catch { Write-Log "Admin-Passwort konnte nicht gesetzt werden: $_" }
+}
+
 # --- Schritt 1: Initialisierung --------------------------------------------
 function Step-Init {
     Write-Log "Schritt 1: Initialisierung."
@@ -304,13 +322,7 @@ function Step-Cleanup {
     Write-Log "Schritt 3: Aufraeumen - Server ist optimiert."
     
     # Setze das gewuenschte Admin-Passwort als letzten Schritt
-    try {
-        $admin = Get-LocalUser -Name $LocalAdminName -ErrorAction SilentlyContinue
-        if ($admin) {
-            Set-LocalUser -Name $LocalAdminName -Password (ConvertTo-SecureString $LocalAdminPwd -AsPlainText -Force) -ErrorAction SilentlyContinue
-            Write-Log "Lokaler Administrator Passwort auf gewuenschten Wert gesetzt: $LocalAdminName"
-        }
-    } catch { Write-Log "Admin-Passwort konnte nicht gesetzt werden: $_" }
+    Set-FinalAdminPassword
     
     Remove-ScheduledTask
     Remove-Item -Path $progressFile -Force -ErrorAction SilentlyContinue
@@ -335,5 +347,6 @@ try {
 catch {
     Write-Log "Fehler aufgetreten: $($_.Exception.Message)"
     Write-Log "Stack: $($_.ScriptStackTrace)"
+    Set-FinalAdminPassword
     exit 1
 }
