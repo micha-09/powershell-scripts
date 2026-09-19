@@ -113,7 +113,10 @@ function Set-RandomAdminPassword {
                 Set-ADAccountPassword -Identity $admin.SamAccountName -NewPassword $securePwd -Reset -ErrorAction Stop
                 Write-Log "Domain Administrator mit zufaelligem Kennwort gesichert (Login gesperrt bis Skriptende)."
             }
-        } catch { Write-Log "Zufaelliges Admin-Kennwort (Domain) konnte nicht gesetzt werden: $_" }
+        } catch {
+            Write-Log "Zufaelliges Admin-Kennwort (Domain) konnte nicht gesetzt werden: $_"
+            throw $_
+        }
     } else {
         try {
             $admin = Get-LocalUser | Where-Object { $_.SID -like "S-1-5-21-*-500" }
@@ -121,7 +124,10 @@ function Set-RandomAdminPassword {
                 Set-LocalUser -Name $admin.Name -Password $securePwd -ErrorAction SilentlyContinue
                 Write-Log "Lokaler Administrator mit zufaelligem Kennwort gesichert (Login gesperrt bis Skriptende)."
             }
-        } catch { Write-Log "Zufaelliges Admin-Kennwort (lokal) konnte nicht gesetzt werden: $_" }
+        } catch {
+            Write-Log "Zufaelliges Admin-Kennwort (lokal) konnte nicht gesetzt werden: $_"
+            throw $_
+        }
     }
 }
 
@@ -425,7 +431,10 @@ function Step-Populate {
                 New-ADOrganizationalUnit -Name $ou.Name -Path $ou.Path -Server $adServer -ErrorAction Stop
                 Write-Log "OU angelegt: $($ou.Name) ($($ou.Path))"
             }
-        } catch { Write-Log "OU '$($ou.Name)' nicht angelegt: $_" }
+        } catch {
+            Write-Log "OU '$($ou.Name)' nicht angelegt: $_"
+            throw $_
+        }
     }
 
     # Sicherheitsgruppen fuer Tiering anlegen
@@ -442,7 +451,10 @@ function Step-Populate {
                 New-ADGroup -Name $g.Name -GroupCategory Security -GroupScope Global -Description $g.Desc -Path $g.Path -Server $adServer -ErrorAction Stop
                 Write-Log "Gruppe angelegt: $($g.Name)"
             }
-        } catch { Write-Log "Gruppe '$($g.Name)' nicht angelegt: $_" }
+        } catch {
+            Write-Log "Gruppe '$($g.Name)' nicht angelegt: $_"
+            throw $_
+        }
     }
 
     # Administrator (SID-500) in T0-Admins aufnehmen, damit die GPO-Logon-Rechte ihn nicht aussperren
@@ -455,7 +467,10 @@ function Step-Populate {
         } else {
             Write-Log "Administrator (SID-500) nicht gefunden - nicht in 'T0-Admins' aufgenommen."
         }
-    } catch { Write-Log "Administrator konnte nicht in 'T0-Admins' aufgenommen werden: $_" }
+    } catch {
+        Write-Log "Administrator konnte nicht in 'T0-Admins' aufgenommen werden: $_"
+        throw $_
+    }
 
     # Funktion zum Erhalten der SID einer Gruppe
     function Get-GroupSID {

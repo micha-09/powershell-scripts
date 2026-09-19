@@ -225,7 +225,10 @@ function Step-Init {
             Enable-LocalUser -Name $LocalAdminName -ErrorAction SilentlyContinue
             Write-Log "Lokaler Administrator umbenannt und mit zufaelligem Passwort gesichert: $LocalAdminName"
         }
-    } catch { Write-Log "Lokaler Administrator nicht angepasst: $_" }
+    } catch {
+        Write-Log "Lokaler Administrator nicht angepasst: $_"
+        throw $_
+    }
 
     Set-StaticIPConfig
     # Ermoeglichen spaeterer RDP-Verwaltung
